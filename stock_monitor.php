@@ -25,6 +25,8 @@ class StockMonitor
     private $refreshInterval = 5;
     private $onlyTradingTime = false;
     private $wechatWebhook = '';
+    private $formatCache = [];
+    private $strWidthCache = [];
 
     public function __construct($configFile, $apiType = 'sina')
     {
@@ -41,6 +43,7 @@ class StockMonitor
 
         $lines = file($this->configFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
 
+        $newHoldings = [];
         foreach ($lines as $line) {
             $line = trim($line);
             if (empty($line) || str_starts_with($line, '#')) {
@@ -74,14 +77,14 @@ class StockMonitor
             $parts = explode('|', $line);
             if (count($parts) === 3) {
                 list($code, $shares, $cost) = $parts;
-                $this->holdings[] = [
+                $newHoldings[] = [
                     'code' => trim($code),
                     'shares' => (float) $shares,
                     'cost' => (float) $cost,
                 ];
             } elseif (count($parts) === 4) {
                 list($code, $name, $shares, $cost) = $parts;
-                $this->holdings[] = [
+                $newHoldings[] = [
                     'code' => trim($code),
                     'shares' => (float) $shares,
                     'cost' => (float) $cost,
@@ -89,8 +92,19 @@ class StockMonitor
             }
         }
 
-        if (empty($this->holdings)) {
+        if (empty($newHoldings)) {
             $this->error('配置文件中没有有效的股票数据');
+        }
+
+        $this->holdings = $newHoldings;
+        unset($newHoldings, $lines);
+        
+        if (count($this->formatCache) > 1000) {
+            $this->formatCache = [];
+        }
+        
+        if (count($this->strWidthCache) > 500) {
+            $this->strWidthCache = [];
         }
     }
 
@@ -200,6 +214,10 @@ class StockMonitor
 
     private function strWidth($str)
     {
+        if (isset($this->strWidthCache[$str])) {
+            return $this->strWidthCache[$str];
+        }
+        
         $width = 0;
         $len = mb_strlen($str, 'UTF-8');
         for ($i = 0; $i < $len; $i++) {
@@ -210,6 +228,8 @@ class StockMonitor
                 $width += 1;
             }
         }
+        
+        $this->strWidthCache[$str] = $width;
         return $width;
     }
 
@@ -234,7 +254,11 @@ class StockMonitor
 
     private function formatNumber($num, $decimal = 2)
     {
-        return number_format($num, $decimal, '.', ',');
+        $key = $num . '_' . $decimal;
+        if (!isset($this->formatCache[$key])) {
+            $this->formatCache[$key] = number_format($num, $decimal, '.', ',');
+        }
+        return $this->formatCache[$key];
     }
 
     private function drawBorder($left, $middle, $right, $widths)
@@ -274,13 +298,16 @@ class StockMonitor
 
     private function countdownWait($seconds, $status = '')
     {
+        $gray = self::COLORS['gray'];
+        $reset = "\033[0m";
+        $clearLine = str_repeat(' ', 100) . "\r";
+        
         for ($i = $seconds; $i >= 1; $i--) {
-            $msg = $status . " 下次刷新: {$i}秒";
-            echo self::COLORS['gray'] . $msg . "\033[0m\r";
+            echo $gray . $status . " 下次刷新: {$i}秒" . $reset . "\r";
             flush();
             sleep(1);
         }
-        echo str_repeat(' ', 100) . "\r";
+        echo $clearLine;
     }
 
     private function error($message)
@@ -289,7 +316,7 @@ class StockMonitor
         exit(1);
     }
     
-    private function generateTableContent($stockData, $originalHeaders, $originalWidths)
+    private function generateTableContent($sortedHoldings, $originalHeaders, $originalWidths)
     {
         $content = "股票持仓收益实时监控 - " . date('Y-m-d H:i:s') . "\n\n";
         
@@ -304,23 +331,6 @@ class StockMonitor
                 $fieldIndices[] = $index;
             }
         }
-        
-        // 准备排序数据
-        $sortedHoldings = [];
-        foreach ($this->holdings as $holding) {
-            $code = $holding['code'];
-            if (isset($stockData[$code])) {
-                $info = $stockData[$code];
-                $holding['stockInfo'] = $info;
-                $holding['profitInfo'] = $this->calculateProfit($holding, $info['now']);
-                $sortedHoldings[] = $holding;
-            }
-        }
-        
-        // 按涨跌幅排序
-        usort($sortedHoldings, function($a, $b) {
-            return $b['stockInfo']['changePercent'] <=> $a['stockInfo']['changePercent'];
-        });
         
         // 准备表头和宽度
         $headers = [];
@@ -532,8 +542,8 @@ class StockMonitor
                     
                     // 生成表格内容并发送微信消息
                     $wechatResult = ['success' => false, 'message' => ''];
-                    if (!empty($stockData)) {
-                        $tableContent = $this->generateTableContent($stockData, $headers, $widths);
+                    if (!empty($sortedHoldings)) {
+                        $tableContent = $this->generateTableContent($sortedHoldings, $headers, $widths);
                         $wechatResult = $this->sendWechatMessage($tableContent);
                     }
                     
@@ -602,6 +612,10 @@ class StockMonitor
 
                 $status = $this->onlyTradingTime ? ($this->isTradingTime() ? '交易中' : '非交易') : '';
                 $this->countdownWait($this->refreshInterval, $status);
+                
+                $this->loadConfig();
+                
+                unset($sortedHoldings, $stockData, $tableContent);
             }
         } catch (Exception $e) {
         } finally {
