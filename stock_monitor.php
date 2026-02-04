@@ -150,8 +150,10 @@ class StockMonitor
                     // 计算涨跌额和涨跌幅
                     $now = (float) $fields[3];
                     $yesterday = (float) $fields[2];
-                    $change = $now - $yesterday;
-                    $changePercent = $yesterday > 0 ? round($change / $yesterday * 100, 2) : 0;
+                    
+                    bcscale(3);
+                    $change = (float) bcsub((string)$now, (string)$yesterday, 3);
+                    $changePercent = $yesterday > 0 ? (float) bcdiv(bcmul((string)$change, '100', 3), (string)$yesterday, 3) : 0;
 
                     $results[$code] = [
                             'name' => $fields[0],
@@ -252,7 +254,7 @@ class StockMonitor
         return self::COLORS[$colorName] . $text . self::COLORS['reset'];
     }
 
-    private function formatNumber($num, $decimal = 2)
+    private function formatNumber($num, $decimal = 3)
     {
         $key = $num . '_' . $decimal;
         if (!isset($this->formatCache[$key])) {
@@ -288,10 +290,12 @@ class StockMonitor
 
     private function calculateProfit($holding, $currentPrice)
     {
-        $marketValue = round($holding['shares'] * $currentPrice, 3);
-        $costValue = round($holding['shares'] * $holding['cost'], 3);
-        $profit = round($marketValue - $costValue, 3);
-        $profitRate = $costValue > 0 ? round($profit / $costValue * 100, 3) : 0;
+        bcscale(3);
+        
+        $marketValue = (float) bcmul((string)$holding['shares'], (string)$currentPrice, 3);
+        $costValue = (float) bcmul((string)$holding['shares'], (string)$holding['cost'], 3);
+        $profit = (float) bcsub((string)$marketValue, (string)$costValue, 3);
+        $profitRate = $costValue > 0 ? (float) bcdiv(bcmul((string)$profit, '100', 3), (string)$costValue, 3) : 0;
 
         return [$marketValue, $profit, $profitRate];
     }
@@ -566,8 +570,9 @@ class StockMonitor
 
                 $this->drawBorder('ml', 'mc', 'mr', $widths);
 
-                $totalProfit = $totalMarketValue - $totalCost;
-                $totalProfitRate = $totalCost > 0 ? round($totalProfit / $totalCost * 100, 3) : 0;
+                bcscale(3);
+                $totalProfit = (float) bcsub((string)$totalMarketValue, (string)$totalCost, 3);
+                $totalProfitRate = $totalCost > 0 ? (float) bcdiv(bcmul((string)$totalProfit, '100', 3), (string)$totalCost, 3) : 0;
                 $totalSign = $totalProfit > 0 ? '+' : '';
 
                 echo self::COLORS['gray'] . "|";
