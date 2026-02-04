@@ -19,6 +19,13 @@ class StockMonitor
         'gray' => "\033[90m",
     ];
 
+    // 大盘指数代码
+    private const INDEX_CODES = [
+        'sh000001',  // 上证指数
+        'sz399001',  // 深证成指
+        'sz399006',  // 创业板指
+    ];
+
     private $holdings = [];
     private $configFile;
     private $apiType = 'sina';
@@ -468,6 +475,36 @@ class StockMonitor
 
                 $this->drawBorder('ml', 'mc', 'mr', $widths);
 
+                // 获取并显示大盘指数
+                $indexData = $this->getStockPrices(self::INDEX_CODES);
+                if (!empty($indexData)) {
+                    foreach (self::INDEX_CODES as $indexCode) {
+                        if (isset($indexData[$indexCode])) {
+                            $info = $indexData[$indexCode];
+                            $rowColor = $info['changePercent'] > 0 ? 'red' : ($info['changePercent'] < 0 ? 'green' : 'white');
+                            $changeSign = $info['change'] > 0 ? '+' : '';
+                            
+                            $cells = [
+                                $indexCode,
+                                $info['name'],
+                                $changeSign . $this->formatNumber($info['change']),
+                                $this->formatNumber($info['changePercent']) . '%',
+                                $this->formatNumber($info['high']),
+                                $this->formatNumber($info['low']),
+                                $this->formatNumber($info['now']),
+                                '--',  // 成本价
+                                '--',  // 持仓
+                                '--',  // 市值
+                                '--',  // 盈亏额
+                                '--',  // 盈亏率
+                            ];
+                            $this->drawRow($cells, $widths, $rowColor);
+                        }
+                    }
+                    // 大盘指数和个股之间的分割线
+                    $this->drawBorder('ml', 'mc', 'mr', $widths);
+                }
+
                 $totalMarketValue = 0;
                 $totalCost = 0;
                 $rowCount = 0;
@@ -508,7 +545,7 @@ class StockMonitor
                         $totalCost += $holding['shares'] * $holding['cost'];
                         $rowCount++;
 
-                        $rowColor = $profit > 0 ? 'green' : ($profit < 0 ? 'red' : 'white');
+                        $rowColor = $profit > 0 ? 'red' : ($profit < 0 ? 'green' : 'white');
                         $profitSign = $profit > 0 ? '+' : '';
                         $changeSign = $info['change'] > 0 ? '+' : '';
 
@@ -586,16 +623,36 @@ class StockMonitor
 
                 $this->drawBorder('bl', 'mb', 'br', $widths);
 
+                // 计算今日盈亏 = 今日涨跌额 * 持仓数量
+                $todayProfit = 0;
+                if (!empty($sortedHoldings)) {
+                    foreach ($sortedHoldings as $holding) {
+                        $todayProfit += $holding['stockInfo']['change'] * $holding['shares'];
+                    }
+                }
+                $todaySign = $todayProfit > 0 ? '+' : '';
+                $todayProfitRate = $totalMarketValue > 0 ? round($todayProfit / ($totalMarketValue - $todayProfit) * 100, 2) : 0;
+
                 echo "\n";
                 if ($hasError) {
                     echo $this->color("  接口请求失败，请检查网络或尝试切换接口", 'yellow') . "\n";
                 }
                 if ($totalProfit > 0) {
-                    echo $this->color("  盈利: " . $totalSign . $this->formatNumber($totalProfit) . " (" . $this->formatNumber($totalProfitRate) . "%)", 'green');
+                    echo $this->color("  盈利: " . $totalSign . $this->formatNumber($totalProfit) . " (" . $this->formatNumber($totalProfitRate) . "%)", 'red');
                 } elseif ($totalProfit < 0) {
-                    echo $this->color("  亏损: " . $totalSign . $this->formatNumber($totalProfit) . " (" . $this->formatNumber($totalProfitRate) . "%)", 'red');
+                    echo $this->color("  亏损: " . $totalSign . $this->formatNumber($totalProfit) . " (" . $this->formatNumber($totalProfitRate) . "%)", 'green');
                 } else {
                     echo $this->color("  持平: 0.00 (0.00%)", 'white');
+                }
+                echo "\n";
+                
+                // 显示今日盈亏
+                if ($todayProfit > 0) {
+                    echo $this->color("  今日盈亏: " . $todaySign . $this->formatNumber($todayProfit) . " (" . $todaySign . $this->formatNumber($todayProfitRate) . "%)", 'red');
+                } elseif ($todayProfit < 0) {
+                    echo $this->color("  今日盈亏: " . $this->formatNumber($todayProfit) . " (" . $this->formatNumber($todayProfitRate) . "%)", 'green');
+                } else {
+                    echo $this->color("  今日盈亏: 0.00 (0.00%)", 'white');
                 }
                 echo "\n";
                 
