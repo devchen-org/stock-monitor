@@ -512,7 +512,7 @@ class StockMonitor
                         $totalCost += $holding['shares'] * $holding['cost'];
                         $rowCount++;
 
-                        $rowColor = $profit > 0 ? 'green' : ($profit < 0 ? 'red' : 'white');
+                        $rowColor = $info['changePercent'] < 0 ? 'green' : ($info['changePercent'] > 0 ? 'red' : 'white');
                         $profitSign = $profit > 0 ? '+' : '';
                         $changeSign = $info['change'] > 0 ? '+' : '';
 
