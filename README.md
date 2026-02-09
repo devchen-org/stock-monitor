@@ -59,7 +59,7 @@ trading_time = true  # 是否只在交易时间刷新 （true/false）
 wechat_webhook = https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxxxxx
 ```
 
-### 6. 配置买入和卖出手数（可选）
+### 6. 配置买入和卖出手数用于计算买x手后成本价、卖x手后成本价（可选）
 
 在 `stocks_config.txt` 中添加：
 ```
