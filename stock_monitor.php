@@ -27,6 +27,8 @@ class StockMonitor
     private $wechatWebhook = '';
     private $formatCache = [];
     private $strWidthCache = [];
+    private $buyLots = 1;
+    private $sellLots = 1;
 
     public function __construct($configFile, $apiType = 'sina')
     {
@@ -69,6 +71,12 @@ class StockMonitor
                         break;
                     case 'wechat_webhook':
                         $this->wechatWebhook = $value;
+                        break;
+                    case 'buy_lots':
+                        $this->buyLots = max(1, (int) $value);
+                        break;
+                    case 'sell_lots':
+                        $this->sellLots = max(1, (int) $value);
                         break;
                 }
                 continue;
@@ -300,6 +308,36 @@ class StockMonitor
         return [$marketValue, $profit, $profitRate];
     }
 
+    private function calculateNewCostAfterBuy($holding, $currentPrice, $lots)
+    {
+        bcscale(3);
+        
+        $sharesToBuy = $lots * 100;
+        $currentCostValue = (float) bcmul((string)$holding['shares'], (string)$holding['cost'], 3);
+        $newShares = (float) bcadd((string)$holding['shares'], (string)$sharesToBuy, 3);
+        $newCostValue = (float) bcadd((string)$currentCostValue, (float) bcmul((string)$sharesToBuy, (string)$currentPrice, 3), 3);
+        $newCost = $newShares > 0 ? (float) bcdiv((string)$newCostValue, (string)$newShares, 3) : 0;
+
+        return $newCost;
+    }
+
+    private function calculateNewCostAfterSell($holding, $currentPrice, $lots)
+    {
+        bcscale(3);
+        
+        $sharesToSell = $lots * 100;
+        $newShares = max(0, (float) bcsub((string)$holding['shares'], (string)$sharesToSell, 3));
+        
+        if ($newShares <= 0) {
+            return 0;
+        }
+        
+        $currentCostValue = (float) bcmul((string)$holding['shares'], (string)$holding['cost'], 3);
+        $newCost = (float) bcdiv((string)$currentCostValue, (string)$newShares, 3);
+
+        return $newCost;
+    }
+
     private function countdownWait($seconds, $status = '')
     {
         $gray = self::COLORS['gray'];
@@ -377,6 +415,8 @@ class StockMonitor
                     $this->formatNumber($info['low']),
                     $this->formatNumber($info['now']),
                     $this->formatNumber($holding['cost']),
+                    $this->formatNumber($this->calculateNewCostAfterBuy($holding, $info['now'], $this->buyLots)),
+                    $this->formatNumber($this->calculateNewCostAfterSell($holding, $info['now'], $this->sellLots)),
                     $this->formatNumber($holding['shares'], 0),
                     $this->formatNumber($holding['profitInfo'][0]),
                     (($holding['profitInfo'][1] > 0) ? '+' : '') . $this->formatNumber($holding['profitInfo'][1]),
@@ -447,7 +487,7 @@ class StockMonitor
     {
         try {
             // 增加列宽以适应新增的列
-            $widths = [12, 14, 8, 8, 8, 8, 8, 8, 10, 14, 14, 12];
+            $widths = [12, 14, 8, 8, 8, 8, 8, 8, 10, 14, 14, 12, 14, 14];
 
             $apiName = $this->apiType === 'tencent' ? '腾讯' : '新浪';
             $tradingMode = $this->onlyTradingTime ? '(交易时间)' : '';
@@ -467,7 +507,7 @@ class StockMonitor
                 $this->drawBorder('tl', 'mt', 'tr', $widths);
 
                 // 添加新的表头
-                $headers = ['代码', '名称', '涨跌', '涨跌幅', '最高价', '最低价', '现价', '成本价', '持仓', '市值', '盈亏额', '盈亏率'];
+                $headers = ['代码', '名称', '涨跌', '涨跌幅', '最高价', '最低价', '现价', '成本价', "买{$this->buyLots}手后成本价", "卖{$this->sellLots}手后成本价", '持仓', '市值', '盈亏额', '盈亏率'];
                 $this->drawRow($headers, $widths, 'cyan');
 
                 $this->drawBorder('ml', 'mc', 'mr', $widths);
@@ -525,6 +565,8 @@ class StockMonitor
                                 $this->formatNumber($info['low']),
                                 $this->formatNumber($info['now']),
                                 $this->formatNumber($holding['cost']),
+                                $this->formatNumber($this->calculateNewCostAfterBuy($holding, $info['now'], $this->buyLots)),
+                                $this->formatNumber($this->calculateNewCostAfterSell($holding, $info['now'], $this->sellLots)),
                                 $this->formatNumber($holding['shares'], 0),
                                 $this->formatNumber($marketValue),
                                 $profitSign . $this->formatNumber($profit),
@@ -537,7 +579,7 @@ class StockMonitor
                     foreach ($this->holdings as $holding) {
                         $code = $holding['code'];
                         if (!isset($stockData[$code])) {
-                            $cells = [$holding['code'], '请求失败', '-', '-', '-', '-', '-', '-', '-', '-', '-', '-'];
+                            $cells = [$holding['code'], '请求失败', '-', '-', '-', '-', '-', '-', '-', '-', '-', '-', '-', '-'];
                             $this->drawRow($cells, $widths, 'yellow');
                             $hasError = true;
                             $rowCount++;
@@ -584,10 +626,12 @@ class StockMonitor
                 echo " " . $this->padRight('', $widths[5]) . " |";
                 echo " " . $this->padRight('', $widths[6]) . " |";
                 echo " " . $this->padRight('', $widths[7]) . " |";
-                echo " " . $this->padRight($this->color("总计 ({$rowCount}只)", 'yellow'), $widths[8]) . " |";
+                echo " " . $this->padRight('', $widths[8]) . " |";
                 echo " " . $this->padRight('', $widths[9]) . " |";
-                echo " " . $this->padRight($totalSign . $this->formatNumber($totalProfit), $widths[10]) . " |";
-                echo " " . $this->padRight($this->formatNumber($totalProfitRate) . '%', $widths[11]) . " |\033[0m\n";
+                echo " " . $this->padRight($this->color("总计 ({$rowCount}只)", 'yellow'), $widths[10]) . " |";
+                echo " " . $this->padRight('', $widths[11]) . " |";
+                echo " " . $this->padRight($totalSign . $this->formatNumber($totalProfit), $widths[12]) . " |";
+                echo " " . $this->padRight($this->formatNumber($totalProfitRate) . '%', $widths[13]) . " |\033[0m\n";
 
                 $this->drawBorder('bl', 'mb', 'br', $widths);
 

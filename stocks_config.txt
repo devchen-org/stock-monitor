@@ -2,13 +2,17 @@
 tencent
 
 # 是否只在交易时间刷新 （true/false）
-trading_time=false
+trading_time=true
 
 # 刷新间隔
-interval = 20
+interval = 10
+
+# 买入和卖出手数
+buy_lots=2
+sell_lots=2
 
 # 企业微信机器人webhook（可选，用于发送表格）
-wechat_webhook = https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxxxxx
+wechat_webhook = https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=7d7bb8e8-d04a-4e16-8b0b-274f52794b9e
 
 # 股票持仓配置
 # 格式：股票代码|持仓数量|买入价格
@@ -17,7 +21,9 @@ wechat_webhook = https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxxxxx
 # 深交所（sz） 主板A股‌：以000开头 创业板‌：以300开头
 # ETF基金支持：上交所(sh510050)、深交所(sz159915)等
 
-sh600519|100|1500.00
-sh601318|200|45.00
-sh510050|500|3.000
-sz159915|300|1.500
+
+sh600422|2700|12.741
+sh603108|2300|18.299
+sh603589|1700|30.197
+sz002987|200|21.842
+sz159128|8100|0.890
