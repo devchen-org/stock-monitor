@@ -487,7 +487,8 @@ class StockMonitor
     {
         try {
             // 增加列宽以适应新增的列
-            $widths = [12, 14, 8, 8, 8, 8, 8, 8, 10, 14, 14, 12, 14, 14];
+            // 顺序：代码, 名称, 涨跌, 涨跌幅, 最高价, 最低价, 现价, 成本价, 买x手后成本价, 卖x手后成本价, 持仓, 市值, 盈亏额, 盈亏率
+            $widths = [12, 14, 8, 8, 8, 8, 8, 8, 14, 14, 10, 14, 14, 12];
 
             $apiName = $this->apiType === 'tencent' ? '腾讯' : '新浪';
             $tradingMode = $this->onlyTradingTime ? '(交易时间)' : '';
@@ -603,6 +604,7 @@ class StockMonitor
                         $cells = [
                                 $holding['code'], '--', '--', '--', '--', '--', '--',
                                 $this->formatNumber($holding['cost']),
+                                '--', '--',
                                 $this->formatNumber($holding['shares'], 0), '--', '--', '--'
                         ];
                         $this->drawRow($cells, $widths, 'gray');
