@@ -26,6 +26,9 @@ switch ($path) {
     case '/wechat/send':
         handleWechatSend();
         break;
+    case '/t-transactions':
+        handleTTransactions($method);
+        break;
     default:
         http_response_code(404);
         echo json_encode(['error' => 'API endpoint not found']);
@@ -200,5 +203,73 @@ function handleWechatSend() {
     
     $result = Wechat::sendMessage($content, $wechatWebhook);
     echo json_encode($result);
+}
+
+// 处理做T交易相关操作
+function handleTTransactions($method) {
+    switch ($method) {
+        case 'GET':
+            // 获取做T交易记录
+            $stockCode = $_GET['stock_code'] ?? null;
+            $transactions = Database::getTTransactions($stockCode);
+            echo json_encode($transactions);
+            break;
+        case 'POST':
+            // 添加做T交易记录
+            $data = json_decode(file_get_contents('php://input'), true);
+            if (isset($data['stock_code'], $data['stock_name'], $data['shares'])) {
+                $success = Database::addTTransaction(
+                    $data['stock_code'],
+                    $data['stock_name'],
+                    $data['buy_price'] ?? 0,
+                    $data['sell_price'] ?? 0,
+                    $data['shares'],
+                    $data['buy_time'] ?? '',
+                    $data['sell_time'] ?? '',
+                    $data['profit'] ?? 0,
+                    $data['status'] ?? 'completed'
+                );
+                echo json_encode(['success' => $success, 'id' => Database::getConnection()->lastInsertId()]);
+            } else {
+                http_response_code(400);
+                echo json_encode(['error' => 'Missing required fields']);
+            }
+            break;
+        case 'PUT':
+            // 更新做T交易记录
+            $data = json_decode(file_get_contents('php://input'), true);
+            if (isset($data['id'])) {
+                $id = $data['id'];
+                unset($data['id']);
+                $success = Database::updateTTransaction($id, $data);
+                echo json_encode(['success' => $success]);
+            } else {
+                http_response_code(400);
+                echo json_encode(['error' => 'Missing required fields']);
+            }
+            break;
+        case 'DELETE':
+            // 删除做T交易记录
+            $data = json_decode(file_get_contents('php://input'), true);
+            if (isset($data['id'])) {
+                $success = Database::deleteTTransaction($data['id']);
+                echo json_encode(['success' => $success]);
+            } else {
+                http_response_code(400);
+                echo json_encode(['error' => 'Missing required fields']);
+            }
+            break;
+        default:
+            http_response_code(405);
+            echo json_encode(['error' => 'Method not allowed']);
+            break;
+    }
+}
+
+// 获取做T交易统计
+function handleTTransactionStats() {
+    $stockCode = $_GET['stock_code'] ?? null;
+    $stats = Database::getTTransactionStats($stockCode);
+    echo json_encode($stats);
 }
 ?>

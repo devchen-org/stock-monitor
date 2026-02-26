@@ -81,6 +81,9 @@
                             <a class="nav-link" :class="{ active: activePage === 'holdings' }" @click="activePage = 'holdings'">持仓管理</a>
                         </li>
                         <li class="nav-item">
+                            <a class="nav-link" :class="{ active: activePage === 't-transaction' }" @click="activePage = 't-transaction'">做T记录</a>
+                        </li>
+                        <li class="nav-item">
                             <a class="nav-link" :class="{ active: activePage === 'settings' }" @click="activePage = 'settings'">系统设置</a>
                         </li>
                         <li class="nav-item">
@@ -297,6 +300,203 @@
                     </div>
                 </div>
             </div>
+            
+            <!-- 做T记录和成本计算器页面 -->
+            <div v-if="activePage === 't-transaction'">
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">做T交易记录</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-4">
+                            <h6>做T流程</h6>
+                            <p>1. 选择持仓股票 → 2. 记录卖出信息 → 3. 实时监控股价 → 4. 记录买入信息 → 5. 完成做T</p>
+                            
+                            <!-- 选择持仓股票 -->
+                            <div class="mb-3">
+                                <label class="form-label">选择持仓股票</label>
+                                <select v-model="selectedStock" class="form-select" @change="onStockSelected">
+                                    <option value="">请选择股票</option>
+                                    <option v-for="holding in holdings" :key="holding.id" :value="holding">
+                                        {{ holding.code }} - {{ holding.stockInfo?.name || holding.name }}
+                                    </option>
+                                </select>
+                            </div>
+                            
+                            <!-- 卖出记录 -->
+                            <div v-if="selectedStock" class="card mb-3">
+                                <div class="card-header">
+                                    <h6>步骤1: 记录卖出信息</h6>
+                                </div>
+                                <div class="card-body">
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <div class="mb-3">
+                                                <label class="form-label">卖出价格</label>
+                                                <input type="number" v-model.number="tProcess.sellPrice" class="form-control" min="0.01" step="0.01">
+                                            </div>
+                                            <div class="mb-3">
+                                                <label class="form-label">卖出股数</label>
+                                                <input type="number" v-model.number="tProcess.sellShares" class="form-control" min="1">
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="mb-3">
+                                                <label class="form-label">卖出时间</label>
+                                                <input type="datetime-local" v-model="tProcess.sellTime" class="form-control">
+                                            </div>
+                                            <div class="mb-3">
+                                                <label class="form-label">目标下跌百分比 (%)</label>
+                                                <input type="number" v-model.number="tProcess.targetDropPercent" class="form-control" min="0.1" step="0.1">
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <button class="btn btn-primary" @click="startTProcess">开始做T监控</button>
+                                </div>
+                            </div>
+                            
+                            <!-- 实时监控 -->
+                            <div v-if="tProcess.isMonitoring" class="card mb-3">
+                                <div class="card-header">
+                                    <h6>步骤2: 实时监控股价</h6>
+                                </div>
+                                <div class="card-body">
+                                    <div class="mb-3">
+                                        <p>当前股价: <span :class="getChangeClass(tProcess.currentPrice - tProcess.sellPrice)">{{ tProcess.currentPrice }}</span></p>
+                                        <p>目标价格: <span class="text-danger">{{ tProcess.targetPrice }}</span></p>
+                                        <p>下跌百分比: <span :class="getChangeClass(tProcess.dropPercent)">{{ tProcess.dropPercent.toFixed(2) }}%</span></p>
+                                        <div class="progress mt-2">
+                                            <div class="progress-bar bg-danger" :style="{ width: tProcess.dropPercent + '%' }" role="progressbar" :aria-valuenow="tProcess.dropPercent" aria-valuemin="0" aria-valuemax="tProcess.targetDropPercent"></div>
+                                        </div>
+                                    </div>
+                                    <button class="btn btn-success" @click="stopTProcess">停止监控</button>
+                                </div>
+                            </div>
+                            
+                            <!-- 买入记录 -->
+                            <div v-if="tProcess.isReadyToBuy" class="card mb-3">
+                                <div class="card-header">
+                                    <h6>步骤3: 记录买入信息</h6>
+                                </div>
+                                <div class="card-body">
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <div class="mb-3">
+                                                <label class="form-label">买入价格</label>
+                                                <input type="number" v-model.number="tProcess.buyPrice" class="form-control" min="0.01" step="0.01">
+                                            </div>
+                                            <div class="mb-3">
+                                                <label class="form-label">买入股数</label>
+                                                <input type="number" v-model.number="tProcess.buyShares" class="form-control" min="1">
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="mb-3">
+                                                <label class="form-label">买入时间</label>
+                                                <input type="datetime-local" v-model="tProcess.buyTime" class="form-control">
+                                            </div>
+                                            <div class="mb-3">
+                                                <label class="form-label">交易佣金费率 (%)</label>
+                                                <input type="number" v-model.number="tProcess.commissionRate" class="form-control" min="0" step="0.001" value="0.03">
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="mt-3">
+                                        <h6>计算结果：</h6>
+                                        <p>做T盈利：<span :class="getChangeClass(tProcess.profit)">{{ formatChange(tProcess.profit) }}</span></p>
+                                        <p>新成本价：<span>{{ tProcess.newCost.toFixed(2) }}</span></p>
+                                        <p>成本降低：<span :class="getChangeClass(tProcess.costReduction)">{{ formatChange(tProcess.costReduction) }}</span></p>
+                                    </div>
+                                    <button class="btn btn-primary" @click="completeTProcess">完成做T</button>
+                                </div>
+                            </div>
+                            
+                            <!-- 做T记录列表 -->
+                            <div class="mt-4">
+                                <h6>做T交易记录</h6>
+                                <table class="table table-hover">
+                                    <thead>
+                                        <tr>
+                                            <th>股票代码</th>
+                                            <th>股票名称</th>
+                                            <th>买入价格</th>
+                                            <th>卖出价格</th>
+                                            <th>股数</th>
+                                            <th>买入时间</th>
+                                            <th>卖出时间</th>
+                                            <th>盈利</th>
+                                            <th>操作</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr v-for="transaction in tTransactions" :key="transaction.id">
+                                            <td>{{ transaction.stock_code }}</td>
+                                            <td>{{ transaction.stock_name }}</td>
+                                            <td>{{ transaction.buy_price }}</td>
+                                            <td>{{ transaction.sell_price }}</td>
+                                            <td>{{ transaction.shares }}</td>
+                                            <td>{{ transaction.buy_time }}</td>
+                                            <td>{{ transaction.sell_time }}</td>
+                                            <td :class="getChangeClass(transaction.profit)">{{ formatChange(transaction.profit) }}</td>
+                                    <td>
+                                        <button class="btn btn-outline-secondary btn-sm me-1" @click="editTTransaction(transaction)">编辑</button>
+                                        <button class="btn btn-outline-danger btn-sm" @click="deleteTTransaction(transaction.id)">删除</button>
+                                    </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">股票T成本计算器</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">当前持仓成本价</label>
+                                    <input type="number" v-model.number="tCalculator.currentCost" class="form-control" min="0.01" step="0.01">
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">当前持仓数量</label>
+                                    <input type="number" v-model.number="tCalculator.currentShares" class="form-control" min="1">
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">做T买入价格</label>
+                                    <input type="number" v-model.number="tCalculator.buyPrice" class="form-control" min="0.01" step="0.01">
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">做T卖出价格</label>
+                                    <input type="number" v-model.number="tCalculator.sellPrice" class="form-control" min="0.01" step="0.01">
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">做T股数</label>
+                                    <input type="number" v-model.number="tCalculator.tShares" class="form-control" min="1">
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">交易佣金费率 (%)</label>
+                                    <input type="number" v-model.number="tCalculator.commissionRate" class="form-control" min="0" step="0.001" value="0.03">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="mt-4">
+                            <button class="btn btn-primary" @click="calculateTCost">计算</button>
+                            <div class="mt-3">
+                                <h6>计算结果：</h6>
+                                <p>做T盈利：<span :class="getChangeClass(tCalculator.profit)">{{ formatChange(tCalculator.profit) }}</span></p>
+                                <p>新成本价：<span>{{ tCalculator.newCost.toFixed(2) }}</span></p>
+                                <p>成本降低：<span :class="getChangeClass(tCalculator.costReduction)">{{ formatChange(tCalculator.costReduction) }}</span></p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
         
         <!-- 添加持仓模态框 -->
@@ -366,6 +566,58 @@
                 </div>
             </div>
         </div>
+        
+        <!-- 添加做T交易记录模态框 -->
+        <div class="modal fade" id="addTTransactionModal" tabindex="-1" aria-labelledby="addTTransactionModalLabel" aria-hidden="true">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="addTTransactionModalLabel">添加做T交易记录</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="mb-3">
+                            <label class="form-label">股票代码</label>
+                            <input type="text" v-model="newTTransaction.stock_code" class="form-control">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">股票名称</label>
+                            <input type="text" v-model="newTTransaction.stock_name" class="form-control">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">买入价格</label>
+                            <input type="number" v-model.number="newTTransaction.buy_price" class="form-control" min="0.01" step="0.01">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">卖出价格</label>
+                            <input type="number" v-model.number="newTTransaction.sell_price" class="form-control" min="0.01" step="0.01">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">股数</label>
+                            <input type="number" v-model.number="newTTransaction.shares" class="form-control" min="1">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">买入时间</label>
+                            <input type="datetime-local" v-model="newTTransaction.buy_time" class="form-control">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">卖出时间</label>
+                            <input type="datetime-local" v-model="newTTransaction.sell_time" class="form-control">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">盈利</label>
+                            <input type="number" v-model.number="newTTransaction.profit" class="form-control" step="0.01">
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                        <button type="button" class="btn btn-primary" @click="addTTransaction">保存</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+
     </div>
     
     <script src="https://cdn.jsdelivr.net/npm/vue@2.6.14/dist/vue.js"></script>
@@ -376,6 +628,7 @@
             data: {
                 activePage: 'dashboard',
                 holdings: [],
+                tTransactions: [],
                 total: {
                     marketValue: 0,
                     cost: 0,
@@ -406,11 +659,55 @@
                     name: '',
                     shares: 0,
                     cost: 0
+                },
+                newTTransaction: {
+                    stock_code: '',
+                    stock_name: '',
+                    buy_price: 0,
+                    sell_price: 0,
+                    shares: 0,
+                    buy_time: '',
+                    sell_time: '',
+                    profit: 0
+                },
+
+                tCalculator: {
+                    currentCost: 0,
+                    currentShares: 0,
+                    buyPrice: 0,
+                    sellPrice: 0,
+                    tShares: 0,
+                    commissionRate: 0.03,
+                    profit: 0,
+                    newCost: 0,
+                    costReduction: 0
+                },
+                selectedStock: null,
+                tProcess: {
+                    sellPrice: 0,
+                    sellShares: 0,
+                    sellTime: '',
+                    targetDropPercent: 2,
+                    currentPrice: 0,
+                    targetPrice: 0,
+                    dropPercent: 0,
+                    buyPrice: 0,
+                    buyShares: 0,
+                    buyTime: '',
+                    commissionRate: 0.03,
+                    profit: 0,
+                    newCost: 0,
+                    costReduction: 0,
+                    isMonitoring: false,
+                    isReadyToBuy: false,
+                    monitoringTimer: null,
+                    transactionId: null
                 }
             },
             mounted() {
                 this.loadSettings();
                 this.refreshData();
+                this.loadTTransactions();
                 this.startAutoRefresh();
             },
             methods: {
@@ -616,6 +913,316 @@
                     }
                     const currentCostValue = holding.shares * holding.cost;
                     return currentCostValue / newShares;
+                },
+                
+                // 加载做T交易记录
+                loadTTransactions() {
+                    fetch('api/index.php/t-transactions')
+                        .then(response => response.json())
+                        .then(data => {
+                            this.tTransactions = data;
+                        });
+                },
+                
+                // 添加做T交易记录
+                addTTransaction() {
+                    fetch('api/index.php/t-transactions', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(this.newTTransaction)
+                    })
+                    .then(() => {
+                        const addModal = bootstrap.Modal.getInstance(document.getElementById('addTTransactionModal'));
+                        addModal.hide();
+                        this.newTTransaction = {
+                            stock_code: '',
+                            stock_name: '',
+                            buy_price: 0,
+                            sell_price: 0,
+                            shares: 0,
+                            buy_time: '',
+                            sell_time: '',
+                            profit: 0
+                        };
+                        this.loadTTransactions();
+                    });
+                },
+                
+                // 删除做T交易记录
+                deleteTTransaction(id) {
+                    if (confirm('确定要删除这条做T记录吗？')) {
+                        fetch('api/index.php/t-transactions', {
+                            method: 'DELETE',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({ id })
+                        })
+                        .then(() => {
+                            this.loadTTransactions();
+                        });
+                    }
+                },
+                
+                // 编辑做T交易记录
+                editTTransaction(transaction) {
+                    // 找到对应的持仓股票
+                    const stockCode = transaction.stock_code;
+                    const holding = this.holdings.find(h => h.code === stockCode);
+                    
+                    if (holding) {
+                        // 设置选中的股票
+                        this.selectedStock = holding;
+                        
+                        // 填充步骤1的表单数据
+                        this.tProcess = {
+                            sellPrice: transaction.sell_price,
+                            sellShares: transaction.shares,
+                            sellTime: transaction.sell_time,
+                            targetDropPercent: 2,
+                            currentPrice: holding.stockInfo?.now || 0,
+                            targetPrice: 0,
+                            dropPercent: 0,
+                            buyPrice: 0,
+                            buyShares: transaction.shares,
+                            buyTime: '',
+                            commissionRate: 0.03,
+                            profit: 0,
+                            newCost: 0,
+                            costReduction: 0,
+                            isMonitoring: false,
+                            isReadyToBuy: false,
+                            monitoringTimer: null,
+                            transactionId: transaction.id
+                        };
+                    }
+                },
+                
+
+                
+                // 计算做T成本
+                calculateTCost() {
+                    const { currentCost, currentShares, buyPrice, sellPrice, tShares, commissionRate } = this.tCalculator;
+                    
+                    // 计算交易佣金
+                    const buyCommission = buyPrice * tShares * (commissionRate / 100);
+                    const sellCommission = sellPrice * tShares * (commissionRate / 100);
+                    const totalCommission = buyCommission + sellCommission;
+                    
+                    // 计算盈利
+                    const profit = (sellPrice - buyPrice) * tShares - totalCommission;
+                    
+                    // 计算新成本价
+                    const totalCost = currentCost * currentShares;
+                    const newCost = (totalCost - profit) / currentShares;
+                    
+                    // 计算成本降低
+                    const costReduction = currentCost - newCost;
+                    
+                    // 更新计算结果
+                    this.tCalculator.profit = profit;
+                    this.tCalculator.newCost = newCost;
+                    this.tCalculator.costReduction = costReduction;
+                },
+                
+                // 当选择股票时的处理
+                onStockSelected() {
+                    if (this.selectedStock && this.selectedStock.stockInfo) {
+                        this.tProcess.sellPrice = this.selectedStock.stockInfo.now;
+                        this.tProcess.currentPrice = this.selectedStock.stockInfo.now;
+                    }
+                },
+                
+                // 开始做T监控
+                startTProcess() {
+                    if (!this.selectedStock) return;
+                    
+                    // 计算目标价格
+                    this.tProcess.targetPrice = this.tProcess.sellPrice * (1 - this.tProcess.targetDropPercent / 100);
+                    
+                    // 准备交易数据
+                    const transactionData = {
+                        sell_price: this.tProcess.sellPrice,
+                        shares: this.tProcess.sellShares,
+                        sell_time: this.tProcess.sellTime || new Date().toISOString().slice(0, 16),
+                        status: 'pending'
+                    };
+                    
+                    if (this.tProcess.transactionId) {
+                        // 如果已有交易ID，更新原有记录
+                        fetch('api/index.php/t-transactions', {
+                            method: 'PUT',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({ ...transactionData, id: this.tProcess.transactionId })
+                        })
+                        .then(() => {
+                            // 开始监控
+                            this.tProcess.isMonitoring = true;
+                            this.tProcess.isReadyToBuy = false;
+                            
+                            // 启动定时器，每5秒刷新一次股价
+                            this.tProcess.monitoringTimer = setInterval(() => {
+                                this.refreshData();
+                                if (this.selectedStock && this.selectedStock.stockInfo) {
+                                    this.tProcess.currentPrice = this.selectedStock.stockInfo.now;
+                                    // 计算下跌百分比
+                                    this.tProcess.dropPercent = ((this.tProcess.sellPrice - this.tProcess.currentPrice) / this.tProcess.sellPrice) * 100;
+                                    
+                                    // 检查是否达到目标下跌百分比
+                                    if (this.tProcess.dropPercent >= this.tProcess.targetDropPercent) {
+                                        this.stopTProcess();
+                                        this.tProcess.isReadyToBuy = true;
+                                        this.tProcess.buyPrice = this.tProcess.currentPrice;
+                                        this.tProcess.buyShares = this.tProcess.sellShares;
+                                        this.calculateTProcessProfit();
+                                    }
+                                }
+                            }, 5000);
+                        });
+                    } else {
+                        // 如果没有交易ID，创建新记录
+                        const transaction = {
+                            stock_code: this.selectedStock.code,
+                            stock_name: this.selectedStock.stockInfo?.name || this.selectedStock.name,
+                            buy_price: 0,
+                            sell_price: this.tProcess.sellPrice,
+                            shares: this.tProcess.sellShares,
+                            buy_time: '',
+                            sell_time: this.tProcess.sellTime || new Date().toISOString().slice(0, 16),
+                            profit: 0,
+                            status: 'pending'
+                        };
+                        
+                        fetch('api/index.php/t-transactions', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify(transaction)
+                        })
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.success) {
+                                // 保存交易ID
+                                this.tProcess.transactionId = data.id;
+                                
+                                // 开始监控
+                                this.tProcess.isMonitoring = true;
+                                this.tProcess.isReadyToBuy = false;
+                                
+                                // 启动定时器，每5秒刷新一次股价
+                                this.tProcess.monitoringTimer = setInterval(() => {
+                                    this.refreshData();
+                                    if (this.selectedStock && this.selectedStock.stockInfo) {
+                                        this.tProcess.currentPrice = this.selectedStock.stockInfo.now;
+                                        // 计算下跌百分比
+                                        this.tProcess.dropPercent = ((this.tProcess.sellPrice - this.tProcess.currentPrice) / this.tProcess.sellPrice) * 100;
+                                        
+                                        // 检查是否达到目标下跌百分比
+                                        if (this.tProcess.dropPercent >= this.tProcess.targetDropPercent) {
+                                            this.stopTProcess();
+                                            this.tProcess.isReadyToBuy = true;
+                                            this.tProcess.buyPrice = this.tProcess.currentPrice;
+                                            this.tProcess.buyShares = this.tProcess.sellShares;
+                                            this.calculateTProcessProfit();
+                                        }
+                                    }
+                                }, 5000);
+                            }
+                        });
+                    }
+                },
+                
+                // 停止做T监控
+                stopTProcess() {
+                    if (this.tProcess.monitoringTimer) {
+                        clearInterval(this.tProcess.monitoringTimer);
+                        this.tProcess.monitoringTimer = null;
+                    }
+                    this.tProcess.isMonitoring = false;
+                },
+                
+                // 计算做T盈利
+                calculateTProcessProfit() {
+                    if (!this.selectedStock) return;
+                    
+                    const { sellPrice, buyPrice, sellShares, commissionRate } = this.tProcess;
+                    const currentCost = this.selectedStock.cost;
+                    const currentShares = this.selectedStock.shares;
+                    
+                    // 计算交易佣金
+                    const buyCommission = buyPrice * sellShares * (commissionRate / 100);
+                    const sellCommission = sellPrice * sellShares * (commissionRate / 100);
+                    const totalCommission = buyCommission + sellCommission;
+                    
+                    // 计算盈利
+                    const profit = (sellPrice - buyPrice) * sellShares - totalCommission;
+                    
+                    // 计算新成本价
+                    const totalCost = currentCost * currentShares;
+                    const newCost = (totalCost - profit) / currentShares;
+                    
+                    // 计算成本降低
+                    const costReduction = currentCost - newCost;
+                    
+                    // 更新计算结果
+                    this.tProcess.profit = profit;
+                    this.tProcess.newCost = newCost;
+                    this.tProcess.costReduction = costReduction;
+                },
+                
+                // 完成做T
+                completeTProcess() {
+                    if (!this.selectedStock) return;
+                    
+                    // 计算盈利
+                    this.calculateTProcessProfit();
+                    
+                    // 更新做T交易记录
+                    const transaction = {
+                        id: this.tProcess.transactionId,
+                        buy_price: this.tProcess.buyPrice,
+                        buy_time: this.tProcess.buyTime || new Date().toISOString().slice(0, 16),
+                        profit: this.tProcess.profit,
+                        status: 'completed'
+                    };
+                    
+                    fetch('api/index.php/t-transactions', {
+                        method: 'PUT',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(transaction)
+                    })
+                    .then(() => {
+                        // 重置做T流程
+                        this.tProcess = {
+                            sellPrice: 0,
+                            sellShares: 0,
+                            sellTime: '',
+                            targetDropPercent: 2,
+                            currentPrice: 0,
+                            targetPrice: 0,
+                            dropPercent: 0,
+                            buyPrice: 0,
+                            buyShares: 0,
+                            buyTime: '',
+                            commissionRate: 0.03,
+                            profit: 0,
+                            newCost: 0,
+                            costReduction: 0,
+                            isMonitoring: false,
+                            isReadyToBuy: false,
+                            monitoringTimer: null,
+                            transactionId: null
+                        };
+                        this.selectedStock = null;
+                        this.loadTTransactions();
+                    });
                 }
             }
         });
