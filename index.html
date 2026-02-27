@@ -21,13 +21,13 @@
             font-weight: bold;
         }
         .positive {
-            color: #dc3545;
+            color: #dc3545 !important;
         }
         .negative {
-            color: #28a745;
+            color: #28a745 !important;
         }
         .neutral {
-            color: #6c757d;
+            color: #6c757d !important;
         }
         .refresh-indicator {
             display: inline-block;
@@ -108,7 +108,7 @@
                     </div>
                     <div class="col-md-6 text-end">
                         <button class="btn btn-primary btn-sm me-2" @click="refreshData">手动刷新</button>
-                        <button class="btn btn-success btn-sm" @click="sendWechatMessage">发送到企业微信</button>
+                        <button class="btn btn-success btn-sm" @click="sendWechatMessage(true)">发送到企业微信</button>
                     </div>
                 </div>
                 
@@ -143,7 +143,7 @@
                                 </tr>
                             </thead>
                             <tbody>
-                                <tr v-for="holding in holdings" :key="holding.id">
+                                <tr v-for="holding in holdings" :key="holding.id" :class="getChangeClass(holding.stockInfo?.change || 0)">
                                     <td>{{ holding.code }}</td>
                                     <td>{{ holding.stockInfo?.name || holding.name || '-' }}</td>
                                     <td :class="getChangeClass(holding.stockInfo?.change || 0)">
@@ -291,7 +291,7 @@
                         <div class="mb-4">
                             <h6>发送测试消息</h6>
                             <p>点击下方按钮发送测试消息到企业微信，验证配置是否正确。</p>
-                            <button class="btn btn-primary" @click="sendWechatMessage">发送测试消息</button>
+                            <button class="btn btn-primary" @click="sendWechatMessage(true)">发送测试消息</button>
                         </div>
                         <div class="mb-4">
                             <h6>通知内容说明</h6>
@@ -365,6 +365,9 @@
                                         <p>当前股价: <span :class="getChangeClass(tProcess.currentPrice - tProcess.sellPrice)">{{ tProcess.currentPrice }}</span></p>
                                         <p>目标价格: <span class="text-danger">{{ tProcess.targetPrice }}</span></p>
                                         <p>下跌百分比: <span :class="getChangeClass(tProcess.dropPercent)">{{ tProcess.dropPercent.toFixed(2) }}%</span></p>
+                                        <p>预计盈利: <span :class="getChangeClass(tProcess.profit)">{{ formatChange(tProcess.profit) }}</span></p>
+                                        <p>新成本价: <span>{{ tProcess.newCost.toFixed(2) }}</span></p>
+                                        <p>成本降低: <span :class="getChangeClass(tProcess.costReduction)">{{ formatChange(tProcess.costReduction) }}</span></p>
                                         <div class="progress mt-2">
                                             <div class="progress-bar bg-danger" :style="{ width: tProcess.dropPercent + '%' }" role="progressbar" :aria-valuenow="tProcess.dropPercent" aria-valuemin="0" aria-valuemax="tProcess.targetDropPercent"></div>
                                         </div>
@@ -620,8 +623,8 @@
 
     </div>
     
-    <script src="https://cdn.jsdelivr.net/npm/vue@2.6.14/dist/vue.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/js/vue.js"></script>
+    <script src="/js/bootstrap.bundle.min.js"></script>
     <script>
         new Vue({
             el: '#app',
@@ -735,19 +738,27 @@
                 
                 // 刷新数据
                 refreshData() {
-                    this.isRefreshing = true;
-                    fetch('api/index.php/stock-data')
-                        .then(response => response.json())
-                        .then(data => {
-                            this.holdings = data.holdings;
-                            this.total = data.total;
-                            this.nonTradingMessage = data.nonTradingMessage;
-                            this.lastUpdated = data.timestamp;
-                            this.isRefreshing = false;
-                        })
-                        .catch(() => {
-                            this.isRefreshing = false;
-                        });
+                    return new Promise((resolve, reject) => {
+                        this.isRefreshing = true;
+                        fetch('api/index.php/stock-data')
+                            .then(response => response.json())
+                            .then(data => {
+                                this.holdings = data.holdings;
+                                this.total = data.total;
+                                this.nonTradingMessage = data.nonTradingMessage;
+                                this.lastUpdated = data.timestamp;
+                                this.isRefreshing = false;
+                                // 非交易时间不发送微信消息
+                                if (!this.nonTradingMessage) {
+                                    this.sendWechatMessage();
+                                }
+                                resolve(data);
+                            })
+                            .catch(() => {
+                                this.isRefreshing = false;
+                                reject();
+                            });
+                    });
                 },
                 
                 // 自动刷新
@@ -838,7 +849,7 @@
                 },
                 
                 // 发送企业微信消息
-                sendWechatMessage() {
+                sendWechatMessage(showAlert = false) {
                     // 生成表格内容
                     let content = "股票持仓收益实时监控 - " + new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) + "\n\n";
                     content += "+----------------+----------+----------+----------+----------+\n";
@@ -869,7 +880,9 @@
                     })
                     .then(response => response.json())
                     .then(data => {
-                        alert(data.message);
+                        if (showAlert) {
+                            alert(data.message);
+                        }
                     });
                 },
                 
@@ -890,8 +903,9 @@
                 
                 // 获取涨跌颜色类
                 getChangeClass(value) {
-                    if (value > 0) return 'positive';
-                    if (value < 0) return 'negative';
+                    const numValue = parseFloat(value) || 0;
+                    if (numValue > 0) return 'positive';
+                    if (numValue < 0) return 'negative';
                     return 'neutral';
                 },
                 
@@ -1042,6 +1056,11 @@
                     // 计算目标价格
                     this.tProcess.targetPrice = this.tProcess.sellPrice * (1 - this.tProcess.targetDropPercent / 100);
                     
+                    // 请求浏览器通知权限
+                    if ('Notification' in window) {
+                        Notification.requestPermission();
+                    }
+                    
                     // 准备交易数据
                     const transactionData = {
                         sell_price: this.tProcess.sellPrice,
@@ -1066,21 +1085,30 @@
                             
                             // 启动定时器，每5秒刷新一次股价
                             this.tProcess.monitoringTimer = setInterval(() => {
-                                this.refreshData();
-                                if (this.selectedStock && this.selectedStock.stockInfo) {
-                                    this.tProcess.currentPrice = this.selectedStock.stockInfo.now;
-                                    // 计算下跌百分比
-                                    this.tProcess.dropPercent = ((this.tProcess.sellPrice - this.tProcess.currentPrice) / this.tProcess.sellPrice) * 100;
-                                    
-                                    // 检查是否达到目标下跌百分比
-                                    if (this.tProcess.dropPercent >= this.tProcess.targetDropPercent) {
-                                        this.stopTProcess();
-                                        this.tProcess.isReadyToBuy = true;
-                                        this.tProcess.buyPrice = this.tProcess.currentPrice;
-                                        this.tProcess.buyShares = this.tProcess.sellShares;
-                                        this.calculateTProcessProfit();
+                                this.refreshData().then(() => {
+                                    // 刷新数据后，重新获取选中股票的最新数据
+                                    if (this.selectedStock) {
+                                        const updatedStock = this.holdings.find(h => h.code === this.selectedStock.code);
+                                        if (updatedStock && updatedStock.stockInfo) {
+                                            this.tProcess.currentPrice = updatedStock.stockInfo.now;
+                                            // 更新买入价格为当前股价，用于计算预计盈利
+                                            this.tProcess.buyPrice = this.tProcess.currentPrice;
+                                            // 计算下跌百分比
+                                            this.tProcess.dropPercent = ((this.tProcess.sellPrice - this.tProcess.currentPrice) / this.tProcess.sellPrice) * 100;
+                                            // 实时计算预计盈利
+                                            this.calculateTProcessProfit();
+                                            
+                                            // 检查是否达到目标下跌百分比
+                                            if (this.tProcess.dropPercent >= this.tProcess.targetDropPercent) {
+                                                // 发送浏览器通知
+                                                this.sendNotification();
+                                                this.stopTProcess();
+                                                this.tProcess.isReadyToBuy = true;
+                                                this.tProcess.buyShares = this.tProcess.sellShares;
+                                            }
+                                        }
                                     }
-                                }
+                                });
                             }, 5000);
                         });
                     } else {
@@ -1116,23 +1144,42 @@
                                 
                                 // 启动定时器，每5秒刷新一次股价
                                 this.tProcess.monitoringTimer = setInterval(() => {
-                                    this.refreshData();
-                                    if (this.selectedStock && this.selectedStock.stockInfo) {
-                                        this.tProcess.currentPrice = this.selectedStock.stockInfo.now;
-                                        // 计算下跌百分比
-                                        this.tProcess.dropPercent = ((this.tProcess.sellPrice - this.tProcess.currentPrice) / this.tProcess.sellPrice) * 100;
-                                        
-                                        // 检查是否达到目标下跌百分比
-                                        if (this.tProcess.dropPercent >= this.tProcess.targetDropPercent) {
-                                            this.stopTProcess();
-                                            this.tProcess.isReadyToBuy = true;
-                                            this.tProcess.buyPrice = this.tProcess.currentPrice;
-                                            this.tProcess.buyShares = this.tProcess.sellShares;
-                                            this.calculateTProcessProfit();
+                                    this.refreshData().then(() => {
+                                        // 刷新数据后，重新获取选中股票的最新数据
+                                        if (this.selectedStock) {
+                                            const updatedStock = this.holdings.find(h => h.code === this.selectedStock.code);
+                                            if (updatedStock && updatedStock.stockInfo) {
+                                                this.tProcess.currentPrice = updatedStock.stockInfo.now;
+                                                // 更新买入价格为当前股价，用于计算预计盈利
+                                                this.tProcess.buyPrice = this.tProcess.currentPrice;
+                                                // 计算下跌百分比
+                                                this.tProcess.dropPercent = ((this.tProcess.sellPrice - this.tProcess.currentPrice) / this.tProcess.sellPrice) * 100;
+                                                // 实时计算预计盈利
+                                                this.calculateTProcessProfit();
+                                                
+                                                // 检查是否达到目标下跌百分比
+                                                if (this.tProcess.dropPercent >= this.tProcess.targetDropPercent) {
+                                                    // 发送浏览器通知
+                                                    this.sendNotification();
+                                                    this.stopTProcess();
+                                                    this.tProcess.isReadyToBuy = true;
+                                                    this.tProcess.buyShares = this.tProcess.sellShares;
+                                                }
+                                            }
                                         }
-                                    }
+                                    });
                                 }, 5000);
                             }
+                        });
+                    }
+                },
+                
+                // 发送浏览器通知
+                sendNotification() {
+                    if ('Notification' in window && Notification.permission === 'granted') {
+                        new Notification('做T机会提醒', {
+                            body: `股票 ${this.selectedStock.stockInfo?.name || this.selectedStock.name} 已达到目标价格 ${this.tProcess.targetPrice.toFixed(2)}，当前价格 ${this.tProcess.currentPrice.toFixed(2)}`,
+                            icon: '/favicon.ico'
                         });
                     }
                 },
