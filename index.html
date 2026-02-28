@@ -209,6 +209,7 @@
                                     <th>名称</th>
                                     <th>持仓数量</th>
                                     <th>成本价</th>
+                                    <th>现价</th>
                                     <th>操作</th>
                                 </tr>
                             </thead>
@@ -218,6 +219,7 @@
                                     <td>{{ holding.stockInfo?.name || holding.name || '-' }}</td>
                                     <td>{{ holding.shares }}</td>
                                     <td>{{ holding.cost }}</td>
+                                    <td>{{ holding.stockInfo?.now || '-' }}</td>
                                     <td>
                                         <button class="btn btn-outline-secondary btn-sm me-1" @click="editHolding(holding)">编辑</button>
                                         <button class="btn btn-outline-danger btn-sm" @click="deleteHolding(holding.id)">删除</button>
