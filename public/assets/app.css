@@ -233,6 +233,26 @@ thead th {
 #positions-sort-head th.is-active .sort-indicator {
     color: var(--primary);
 }
+.notification-debug-log {
+    min-height: 96px;
+    max-height: 280px;
+    overflow: auto;
+    padding: 12px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: #f8fafc;
+    font-size: 13px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+}
+.notification-debug-item + .notification-debug-item {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px dashed var(--line);
+}
+.notification-debug-item strong {
+    color: var(--text);
+}
 .ttrade-status {
     display: inline-flex;
     align-items: center;

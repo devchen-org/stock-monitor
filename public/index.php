@@ -194,6 +194,7 @@ $appSettings = formatAppSettings($appSettingsRepository->get(), $config);
                         </label>
                         <div class="auth-actions">
                             <button type="button" id="enable-position-alerts">启用浏览器通知</button>
+                            <button type="button" id="test-position-alerts">测试通知</button>
                         </div>
                     </div>
                 </section>
@@ -206,6 +207,16 @@ $appSettings = formatAppSettings($appSettingsRepository->get(), $config);
                     </div>
                 </section>
             </div>
+            <section class="card">
+                <div class="card-header">
+                    <div>
+                        <h2>通知调试输出</h2>
+                        <p class="muted">这里会显示每次准备发送到浏览器的通知内容，便于排查系统通知是否被浏览器或操作系统拦截。</p>
+                    </div>
+                    <button type="button" id="clear-notification-debug">清空日志</button>
+                </div>
+                <div id="notification-debug-log" class="notification-debug-log muted">暂无通知调试记录</div>
+            </section>
         </section>
     </main>
     </div>

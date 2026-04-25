@@ -24,6 +24,7 @@ const state = {
     positionAlertLossPercent: Math.max(0.1, Number(window.APP_CONFIG?.positionAlertLossPercent ?? 5) || 5),
     positionAlertStateBySymbol: {},
     positionAlertsInitialized: false,
+    notificationDebugItems: [],
 };
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -307,6 +308,8 @@ function bindRefreshSettings() {
     const positionAlertGainPercentInput = document.getElementById('position-alert-gain-percent');
     const positionAlertLossPercentInput = document.getElementById('position-alert-loss-percent');
     const enablePositionAlertsButton = document.getElementById('enable-position-alerts');
+    const testPositionAlertsButton = document.getElementById('test-position-alerts');
+    const clearNotificationDebugButton = document.getElementById('clear-notification-debug');
 
     if (refreshSecondsInput) {
         refreshSecondsInput.value = String(state.quoteRefreshSeconds);
@@ -366,6 +369,37 @@ function bindRefreshSettings() {
             toast('浏览器通知未启用');
         });
     }
+
+    if (testPositionAlertsButton) {
+        testPositionAlertsButton.addEventListener('click', async () => {
+            const permission = await requestNotificationPermission();
+            if (permission !== 'granted') {
+                if (permission === 'denied') {
+                    toast('浏览器通知已被拒绝，请在浏览器设置中开启');
+                    return;
+                }
+                toast('浏览器通知未启用');
+                return;
+            }
+
+            const notifiedCount = await testCurrentPositionAlerts();
+            if (notifiedCount > 0) {
+                toast(`已测试推送 ${notifiedCount} 条通知`);
+                return;
+            }
+
+            toast('当前没有持仓达到通知阈值');
+        });
+    }
+
+    if (clearNotificationDebugButton) {
+        clearNotificationDebugButton.addEventListener('click', () => {
+            state.notificationDebugItems = [];
+            renderNotificationDebugLog();
+        });
+    }
+
+    renderNotificationDebugLog();
 }
 
 async function initializeAuth() {
@@ -429,6 +463,8 @@ function clearBusinessState() {
     state.calculatorInputs = {};
     state.positionAlertStateBySymbol = {};
     state.positionAlertsInitialized = false;
+    state.notificationDebugItems = [];
+    renderNotificationDebugLog();
     renderPositionsTable([]);
     renderPositionsSummary({});
     renderWatchlistTable([], []);
@@ -1444,7 +1480,38 @@ async function sendCurrentPositionAlerts() {
     state.positionAlertsInitialized = true;
 }
 
-function sendPositionAlert(item, type, gainThreshold, lossThreshold) {
+async function testCurrentPositionAlerts() {
+    if (!('Notification' in window) || Notification.permission !== 'granted') {
+        return 0;
+    }
+
+    if (state.positions.length === 0) {
+        await loadPositions(true);
+    }
+
+    const gainThreshold = Math.max(0.1, Number(state.positionAlertGainPercent) || 5);
+    const lossThreshold = Math.max(0.1, Number(state.positionAlertLossPercent) || 5);
+    const nextStates = buildPositionAlertStateMap(state.positions, gainThreshold, lossThreshold);
+    let notifiedCount = 0;
+
+    state.positions.forEach((item) => {
+        const symbol = String(item?.symbol || '');
+        const nextState = symbol ? (nextStates[symbol] || null) : null;
+        if (nextState === null) {
+            return;
+        }
+
+        sendPositionAlert(item, nextState, gainThreshold, lossThreshold, {
+            forceVisible: true,
+            uniqueTag: true,
+        });
+        notifiedCount += 1;
+    });
+
+    return notifiedCount;
+}
+
+function sendPositionAlert(item, type, gainThreshold, lossThreshold, options = {}) {
     const symbol = String(item?.symbol || '');
     const name = String(item?.name || '');
     const changePercent = Number(item?.change_percent);
@@ -1457,12 +1524,62 @@ function sendPositionAlert(item, type, gainThreshold, lossThreshold) {
         `当前涨跌幅 ${formatSignedPercent(changePercent)}`,
         thresholdText,
     ].join('，');
+    const baseTag = `${symbol}-${type}`;
+    const tag = options.uniqueTag ? `${baseTag}-${Date.now()}` : baseTag;
+
+    appendNotificationDebugItem({
+        title: titlePrefix,
+        symbol,
+        name,
+        changePercent: formatSignedPercent(changePercent),
+        thresholdText,
+        body,
+        tag,
+        mode: options.uniqueTag ? '测试通知' : '自动通知',
+    });
 
     new Notification(titlePrefix, {
         body,
         icon: 'assets/favicon.svg',
-        tag: `${symbol}-${type}`,
+        tag,
+        renotify: true,
+        requireInteraction: Boolean(options.forceVisible),
     });
+}
+
+function appendNotificationDebugItem(item) {
+    state.notificationDebugItems = [
+        {
+            time: new Date().toLocaleString('zh-CN', { hour12: false }),
+            ...item,
+        },
+        ...state.notificationDebugItems,
+    ].slice(0, 30);
+    renderNotificationDebugLog();
+}
+
+function renderNotificationDebugLog() {
+    const container = document.getElementById('notification-debug-log');
+    if (!container) {
+        return;
+    }
+
+    if (state.notificationDebugItems.length === 0) {
+        container.textContent = '暂无通知调试记录';
+        return;
+    }
+
+    container.innerHTML = state.notificationDebugItems.map((item) => `
+        <div class="notification-debug-item">
+            <div><strong>${escapeHtml(item.mode || '通知')}</strong> · ${escapeHtml(item.time || '--')}</div>
+            <div>标题：${escapeHtml(item.title || '--')}</div>
+            <div>股票：${escapeHtml(item.name ? `${item.name} (${item.symbol})` : (item.symbol || '--'))}</div>
+            <div>涨跌幅：${escapeHtml(item.changePercent || '--')}</div>
+            <div>阈值：${escapeHtml(item.thresholdText || '--')}</div>
+            <div>tag：${escapeHtml(item.tag || '--')}</div>
+            <div>内容：${escapeHtml(item.body || '--')}</div>
+        </div>
+    `).join('');
 }
 
 function formatMoney(value) {
