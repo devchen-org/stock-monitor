@@ -5,6 +5,8 @@ CREATE TABLE IF NOT EXISTS app_settings (
     calculator_default_lot_size INTEGER NOT NULL DEFAULT 1,
     position_alert_gain_percent REAL NOT NULL DEFAULT 5,
     position_alert_loss_percent REAL NOT NULL DEFAULT 5,
+    webhook_channel TEXT NOT NULL DEFAULT '',
+    webhook_url TEXT NOT NULL DEFAULT '',
     login_password_hash TEXT NOT NULL DEFAULT '',
     login_force_password_change INTEGER NOT NULL DEFAULT 1,
     login_password_updated_at TEXT NOT NULL DEFAULT '',
@@ -60,6 +62,8 @@ CREATE TABLE IF NOT EXISTS t_trades (
     second_date TEXT,
     status TEXT NOT NULL DEFAULT 'open',
     profit REAL NOT NULL DEFAULT 0,
+    alert_profit_gain REAL,
+    alert_profit_loss REAL,
     note TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL DEFAULT ''

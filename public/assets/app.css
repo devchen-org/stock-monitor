@@ -71,13 +71,21 @@ button, input, select {
     color: var(--muted);
     font-size: 13px;
 }
-.refresh-field input {
+.refresh-field input,
+.refresh-field select {
     width: 110px;
     padding: 10px 12px;
     border: 1px solid var(--line);
     border-radius: 10px;
     background: #fff;
     color: var(--text);
+}
+.webhook-url-field {
+    width: 100%;
+}
+.webhook-url-field input {
+    width: 100%;
+    min-width: 320px;
 }
 .refresh-checkbox {
     display: inline-flex;
@@ -277,6 +285,28 @@ thead th {
 .ttrade-waiting {
     color: var(--warning);
     font-weight: 700;
+}
+.ttrade-alert-editor {
+    display: grid;
+    gap: 8px;
+    min-width: 190px;
+}
+.ttrade-alert-editor label {
+    display: grid;
+    gap: 4px;
+    color: var(--muted);
+    font-size: 12px;
+}
+.ttrade-alert-editor input {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: #fff;
+    color: var(--text);
+}
+.ttrade-alert-editor button {
+    justify-self: start;
 }
 .result-box {
     margin-top: 16px;

@@ -35,7 +35,9 @@ final class AppSettingsRepository
         bool $quoteRefreshOnlyTradingHours,
         int $calculatorDefaultLotSize,
         float $positionAlertGainPercent,
-        float $positionAlertLossPercent
+        float $positionAlertLossPercent,
+        string $webhookChannel,
+        string $webhookUrl
     ): void
     {
         $statement = $this->pdo->prepare(
@@ -45,6 +47,8 @@ final class AppSettingsRepository
                  calculator_default_lot_size = :calculator_default_lot_size,
                  position_alert_gain_percent = :position_alert_gain_percent,
                  position_alert_loss_percent = :position_alert_loss_percent,
+                 webhook_channel = :webhook_channel,
+                 webhook_url = :webhook_url,
                  updated_at = :updated_at
              WHERE id = 1'
         );
@@ -54,6 +58,8 @@ final class AppSettingsRepository
             ':calculator_default_lot_size' => $calculatorDefaultLotSize,
             ':position_alert_gain_percent' => $positionAlertGainPercent,
             ':position_alert_loss_percent' => $positionAlertLossPercent,
+            ':webhook_channel' => $webhookChannel,
+            ':webhook_url' => $webhookUrl,
             ':updated_at' => date('Y-m-d H:i:s'),
         ]);
     }

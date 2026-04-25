@@ -42,13 +42,13 @@ final class TTradeRepository
                 buy_price, buy_qty, sell_price, sell_qty, fee, trade_date,
                 first_side, first_price, first_qty, first_date,
                 second_side, second_price, second_qty, second_date,
-                status, profit, note, created_at, updated_at
+                status, profit, alert_profit_gain, alert_profit_loss, note, created_at, updated_at
             ) VALUES (
                 :symbol, :name,
                 :buy_price, :buy_qty, :sell_price, :sell_qty, :fee, :trade_date,
                 :first_side, :first_price, :first_qty, :first_date,
                 :second_side, :second_price, :second_qty, :second_date,
-                :status, :profit, :note, :created_at, :updated_at
+                :status, :profit, :alert_profit_gain, :alert_profit_loss, :note, :created_at, :updated_at
             )'
         );
         $statement->execute([
@@ -70,6 +70,8 @@ final class TTradeRepository
             ':second_date' => null,
             ':status' => 'open',
             ':profit' => 0,
+            ':alert_profit_gain' => null,
+            ':alert_profit_loss' => null,
             ':note' => $data['note'],
             ':created_at' => $data['created_at'],
             ':updated_at' => $data['updated_at'],
@@ -158,6 +160,28 @@ final class TTradeRepository
             ':note' => $data['note'],
             ':updated_at' => $data['updated_at'],
         ]);
+    }
+
+    public function updateAlertThresholds(int $id, ?float $gain, ?float $loss): void
+    {
+        $statement = $this->pdo->prepare(
+            'UPDATE t_trades
+             SET alert_profit_gain = :alert_profit_gain,
+                 alert_profit_loss = :alert_profit_loss,
+                 updated_at = :updated_at
+             WHERE id = :id AND status = :status'
+        );
+        $statement->execute([
+            ':id' => $id,
+            ':alert_profit_gain' => $gain,
+            ':alert_profit_loss' => $loss,
+            ':updated_at' => date('Y-m-d H:i:s'),
+            ':status' => 'open',
+        ]);
+
+        if ($statement->rowCount() === 0) {
+            throw new RuntimeException('未完成做T记录不存在');
+        }
     }
 
     public function delete(int $id): void

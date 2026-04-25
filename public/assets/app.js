@@ -22,6 +22,8 @@ const state = {
     calculatorDefaultLotSize: Math.max(1, Number(window.APP_CONFIG?.calculatorDefaultLotSize ?? 1) || 1),
     positionAlertGainPercent: Math.max(0.1, Number(window.APP_CONFIG?.positionAlertGainPercent ?? 5) || 5),
     positionAlertLossPercent: Math.max(0.1, Number(window.APP_CONFIG?.positionAlertLossPercent ?? 5) || 5),
+    webhookChannel: String(window.APP_CONFIG?.webhookChannel ?? ''),
+    webhookUrl: String(window.APP_CONFIG?.webhookUrl ?? '').trim(),
     positionAlertStateBySymbol: {},
     positionAlertsInitialized: false,
     notificationDebugItems: [],
@@ -184,6 +186,7 @@ function bindPositionControls() {
 function bindTTradeControls() {
     const symbolSelect = document.querySelector('#ttrade-form select[name="symbol"]');
     const nameFilter = document.getElementById('ttrade-name-filter');
+    const ttradesTable = document.getElementById('ttrades-table');
 
     if (symbolSelect) {
         symbolSelect.addEventListener('change', () => {
@@ -195,6 +198,22 @@ function bindTTradeControls() {
         nameFilter.addEventListener('change', () => {
             state.ttradeFilterName = nameFilter.value;
             renderTTradesTable(state.ttrades || []);
+        });
+    }
+
+    if (ttradesTable) {
+        ttradesTable.addEventListener('click', async (event) => {
+            const target = event.target;
+            if (!(target instanceof HTMLElement) || !target.matches('[data-ttrade-alert-save]')) {
+                return;
+            }
+
+            const id = Number(target.dataset.id || 0);
+            if (id <= 0) {
+                return;
+            }
+
+            await saveTTradeAlertThresholds(id);
         });
     }
 
@@ -307,8 +326,11 @@ function bindRefreshSettings() {
     const calculatorDefaultLotSizeInput = document.getElementById('calculator-default-lot-size');
     const positionAlertGainPercentInput = document.getElementById('position-alert-gain-percent');
     const positionAlertLossPercentInput = document.getElementById('position-alert-loss-percent');
+    const webhookChannelInput = document.getElementById('webhook-channel');
+    const webhookUrlInput = document.getElementById('webhook-url');
     const enablePositionAlertsButton = document.getElementById('enable-position-alerts');
     const testPositionAlertsButton = document.getElementById('test-position-alerts');
+    const testWebhookButton = document.getElementById('test-webhook-button');
     const clearNotificationDebugButton = document.getElementById('clear-notification-debug');
 
     if (refreshSecondsInput) {
@@ -354,6 +376,20 @@ function bindRefreshSettings() {
         });
     }
 
+    if (webhookChannelInput) {
+        webhookChannelInput.value = state.webhookChannel;
+        webhookChannelInput.addEventListener('change', async () => {
+            await saveDisplaySettings({ webhookChannel: webhookChannelInput.value });
+        });
+    }
+
+    if (webhookUrlInput) {
+        webhookUrlInput.value = state.webhookUrl;
+        webhookUrlInput.addEventListener('change', async () => {
+            await saveDisplaySettings({ webhookUrl: webhookUrlInput.value.trim() });
+        });
+    }
+
     if (enablePositionAlertsButton) {
         enablePositionAlertsButton.addEventListener('click', async () => {
             const permission = await requestNotificationPermission();
@@ -389,6 +425,28 @@ function bindRefreshSettings() {
             }
 
             toast('当前没有持仓达到通知阈值');
+        });
+    }
+
+    if (testWebhookButton) {
+        testWebhookButton.addEventListener('click', async () => {
+            const channel = webhookChannelInput ? webhookChannelInput.value : state.webhookChannel;
+            const url = webhookUrlInput ? webhookUrlInput.value.trim() : state.webhookUrl;
+            const formData = new FormData();
+            formData.append('webhook_channel', channel);
+            formData.append('webhook_url', url);
+            await postForm('webhook.test', formData);
+            appendNotificationDebugItem({
+                title: 'Webhook 测试',
+                symbol: '',
+                name: '',
+                changePercent: '--',
+                thresholdText: '--',
+                body: `已向 ${channel === 'wechat' ? '企业微信' : channel === 'feishu' ? '飞书' : '未选择渠道'} 发送测试 webhook 请求`,
+                tag: channel || '--',
+                mode: 'Webhook 测试',
+            });
+            toast('测试 webhook 消息已发送');
         });
     }
 
@@ -576,12 +634,16 @@ async function saveDisplaySettings(partialSettings) {
     const calculatorDefaultLotSizeInput = document.getElementById('calculator-default-lot-size');
     const positionAlertGainPercentInput = document.getElementById('position-alert-gain-percent');
     const positionAlertLossPercentInput = document.getElementById('position-alert-loss-percent');
+    const webhookChannelInput = document.getElementById('webhook-channel');
+    const webhookUrlInput = document.getElementById('webhook-url');
     const previousSettings = {
         quoteRefreshSeconds: state.quoteRefreshSeconds,
         refreshOnlyTradingHours: state.refreshOnlyTradingHours,
         calculatorDefaultLotSize: state.calculatorDefaultLotSize,
         positionAlertGainPercent: state.positionAlertGainPercent,
         positionAlertLossPercent: state.positionAlertLossPercent,
+        webhookChannel: state.webhookChannel,
+        webhookUrl: state.webhookUrl,
     };
     const nextSettings = {
         quoteRefreshSeconds: partialSettings.quoteRefreshSeconds ?? previousSettings.quoteRefreshSeconds,
@@ -589,6 +651,8 @@ async function saveDisplaySettings(partialSettings) {
         calculatorDefaultLotSize: partialSettings.calculatorDefaultLotSize ?? previousSettings.calculatorDefaultLotSize,
         positionAlertGainPercent: partialSettings.positionAlertGainPercent ?? previousSettings.positionAlertGainPercent,
         positionAlertLossPercent: partialSettings.positionAlertLossPercent ?? previousSettings.positionAlertLossPercent,
+        webhookChannel: partialSettings.webhookChannel ?? previousSettings.webhookChannel,
+        webhookUrl: partialSettings.webhookUrl ?? previousSettings.webhookUrl,
     };
 
     state.quoteRefreshSeconds = nextSettings.quoteRefreshSeconds;
@@ -596,6 +660,8 @@ async function saveDisplaySettings(partialSettings) {
     state.calculatorDefaultLotSize = nextSettings.calculatorDefaultLotSize;
     state.positionAlertGainPercent = nextSettings.positionAlertGainPercent;
     state.positionAlertLossPercent = nextSettings.positionAlertLossPercent;
+    state.webhookChannel = nextSettings.webhookChannel;
+    state.webhookUrl = nextSettings.webhookUrl;
     if (refreshSecondsInput) {
         refreshSecondsInput.value = String(state.quoteRefreshSeconds);
     }
@@ -611,6 +677,12 @@ async function saveDisplaySettings(partialSettings) {
     if (positionAlertLossPercentInput) {
         positionAlertLossPercentInput.value = String(state.positionAlertLossPercent);
     }
+    if (webhookChannelInput) {
+        webhookChannelInput.value = state.webhookChannel;
+    }
+    if (webhookUrlInput) {
+        webhookUrlInput.value = state.webhookUrl;
+    }
     updateRefreshInfo();
     startQuotePolling();
 
@@ -620,6 +692,8 @@ async function saveDisplaySettings(partialSettings) {
     formData.append('calculator_default_lot_size', String(nextSettings.calculatorDefaultLotSize));
     formData.append('position_alert_gain_percent', String(nextSettings.positionAlertGainPercent));
     formData.append('position_alert_loss_percent', String(nextSettings.positionAlertLossPercent));
+    formData.append('webhook_channel', String(nextSettings.webhookChannel));
+    formData.append('webhook_url', String(nextSettings.webhookUrl));
 
     try {
         const settings = await postForm('settings.refresh.update', formData);
@@ -631,6 +705,8 @@ async function saveDisplaySettings(partialSettings) {
         state.calculatorDefaultLotSize = previousSettings.calculatorDefaultLotSize;
         state.positionAlertGainPercent = previousSettings.positionAlertGainPercent;
         state.positionAlertLossPercent = previousSettings.positionAlertLossPercent;
+        state.webhookChannel = previousSettings.webhookChannel;
+        state.webhookUrl = previousSettings.webhookUrl;
         if (refreshSecondsInput) {
             refreshSecondsInput.value = String(state.quoteRefreshSeconds);
         }
@@ -646,6 +722,12 @@ async function saveDisplaySettings(partialSettings) {
         if (positionAlertLossPercentInput) {
             positionAlertLossPercentInput.value = String(state.positionAlertLossPercent);
         }
+        if (webhookChannelInput) {
+            webhookChannelInput.value = state.webhookChannel;
+        }
+        if (webhookUrlInput) {
+            webhookUrlInput.value = state.webhookUrl;
+        }
         updateRefreshInfo();
         startQuotePolling();
         throw error;
@@ -658,12 +740,16 @@ function applyDisplaySettings(settings) {
     state.calculatorDefaultLotSize = Math.max(1, Number(settings?.calculator_default_lot_size ?? state.calculatorDefaultLotSize) || 1);
     state.positionAlertGainPercent = Math.max(0.1, Number(settings?.position_alert_gain_percent ?? state.positionAlertGainPercent) || state.positionAlertGainPercent);
     state.positionAlertLossPercent = Math.max(0.1, Number(settings?.position_alert_loss_percent ?? state.positionAlertLossPercent) || state.positionAlertLossPercent);
+    state.webhookChannel = String(settings?.webhook_channel ?? state.webhookChannel);
+    state.webhookUrl = String(settings?.webhook_url ?? state.webhookUrl).trim();
 
     const refreshSecondsInput = document.getElementById('refresh-seconds');
     const refreshTradingHoursInput = document.getElementById('refresh-trading-hours');
     const calculatorDefaultLotSizeInput = document.getElementById('calculator-default-lot-size');
     const positionAlertGainPercentInput = document.getElementById('position-alert-gain-percent');
     const positionAlertLossPercentInput = document.getElementById('position-alert-loss-percent');
+    const webhookChannelInput = document.getElementById('webhook-channel');
+    const webhookUrlInput = document.getElementById('webhook-url');
     if (refreshSecondsInput) {
         refreshSecondsInput.value = String(state.quoteRefreshSeconds);
     }
@@ -678,6 +764,12 @@ function applyDisplaySettings(settings) {
     }
     if (positionAlertLossPercentInput) {
         positionAlertLossPercentInput.value = String(state.positionAlertLossPercent);
+    }
+    if (webhookChannelInput) {
+        webhookChannelInput.value = state.webhookChannel;
+    }
+    if (webhookUrlInput) {
+        webhookUrlInput.value = state.webhookUrl;
     }
     updateRefreshInfo();
     renderCalculatorTable(state.positions);
@@ -1271,6 +1363,7 @@ function renderTTradesTable(items) {
         const statusText = isOpen ? '未完成' : '已完成';
         const statusClass = isOpen ? 'ttrade-status ttrade-status-open' : 'ttrade-status ttrade-status-closed';
         const rowClass = isOpen ? 'ttrade-row-open' : '';
+        const alertEditor = isOpen ? renderOpenTTradeAlertEditor(item) : '<span class="muted">--</span>';
         return `
         <tr class="${rowClass}">
             <td><span class="${statusClass}">${statusText}</span></td>
@@ -1279,11 +1372,12 @@ function renderTTradesTable(items) {
             <td>${firstRecord}</td>
             <td>${secondRecord}</td>
             <td class="${profitClass(profitValue)}">${profitText}</td>
+            <td>${alertEditor}</td>
             <td>${escapeHtml(item.note || '')}</td>
             <td><div class="actions">${isOpen ? `<button type="button" onclick="estimateOpenTTrade(${item.id})">试算</button>` : ''}<button class="btn-danger" onclick="deleteItem('ttrade.delete', ${item.id}, loadTTrades)">删除</button></div></td>
         </tr>
     `;
-    }).join('') || '<tr><td colspan="8" class="muted">暂无做T记录</td></tr>';
+    }).join('') || '<tr><td colspan="9" class="muted">暂无做T记录</td></tr>';
 }
 
 function renderOpenTTradeSecondRecord(estimate, estimateSideLabel) {
@@ -1301,6 +1395,25 @@ function renderOpenTTradeProfit(estimate) {
     }
 
     return `<div>${formatMoney(estimate.profit)}</div><div class="muted">按相反方向当前价${estimate.second_side === 'buy' ? '买入' : '卖出'}完成</div>`;
+}
+
+function renderOpenTTradeAlertEditor(item) {
+    const gainValue = item.alert_profit_gain ?? '';
+    const lossValue = item.alert_profit_loss ?? '';
+
+    return `
+        <div class="ttrade-alert-editor">
+            <label>
+                <span>正收益</span>
+                <input type="number" min="0.01" step="0.01" data-ttrade-alert-gain data-id="${item.id}" value="${escapeHtml(gainValue === '' || gainValue === null ? '' : String(gainValue))}" placeholder="如 50">
+            </label>
+            <label>
+                <span>负收益</span>
+                <input type="number" min="0.01" step="0.01" data-ttrade-alert-loss data-id="${item.id}" value="${escapeHtml(lossValue === '' || lossValue === null ? '' : String(lossValue))}" placeholder="如 30">
+            </label>
+            <button type="button" data-ttrade-alert-save data-id="${item.id}">保存</button>
+        </div>
+    `;
 }
 
 async function estimateOpenTTrade(id) {
@@ -1321,6 +1434,22 @@ async function estimateOpenTTrade(id) {
     const result = await postForm('ttrade.estimate', formData);
     const actionLabel = result.second_side === 'buy' ? '买入' : '卖出';
     toast(`按 ${formatQuoteNumber(result.second_price)} ${actionLabel} 完成，预计收益 ${formatMoney(result.profit)}`);
+}
+
+async function saveTTradeAlertThresholds(id) {
+    const gainInput = document.querySelector(`[data-ttrade-alert-gain][data-id="${id}"]`);
+    const lossInput = document.querySelector(`[data-ttrade-alert-loss][data-id="${id}"]`);
+    if (!(gainInput instanceof HTMLInputElement) || !(lossInput instanceof HTMLInputElement)) {
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append('id', String(id));
+    formData.append('alert_profit_gain', gainInput.value.trim());
+    formData.append('alert_profit_loss', lossInput.value.trim());
+    await postForm('ttrade.alert.update', formData);
+    toast('收益提醒已保存');
+    await loadTTrades();
 }
 
 async function submitForm(action, form, reload) {

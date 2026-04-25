@@ -12,6 +12,7 @@ function routeRequest(PDO $pdo, array $config): void
     $calculatorService = new CalculatorService();
     $quoteService = new QuoteService($config);
     $positionService = new PositionService($calculatorService);
+    $webhookService = new WebhookService();
 
     $action = $_GET['action'] ?? '';
     if ($action === '') {
@@ -94,7 +95,9 @@ function routeRequest(PDO $pdo, array $config): void
                 $positions = $positionRepository->all();
                 $symbols = array_unique(array_column($positions, 'symbol'));
                 $quotes = $quoteService->getBatch($symbols);
-                successResponse($positionService->hydratePositions($positions, $quotes));
+                $payload = $positionService->hydratePositions($positions, $quotes);
+                pushPositionWebhookAlerts($appSettingsRepository, $webhookService, $payload['positions'] ?? []);
+                successResponse($payload);
                 break;
 
             case 'position.create':
@@ -201,14 +204,30 @@ function routeRequest(PDO $pdo, array $config): void
                 $calculatorDefaultLotSize = requireMinimumInt($_POST['calculator_default_lot_size'] ?? null, 1, '默认手数');
                 $positionAlertGainPercent = requirePositiveFloat($_POST['position_alert_gain_percent'] ?? null, '涨幅提醒');
                 $positionAlertLossPercent = requirePositiveFloat($_POST['position_alert_loss_percent'] ?? null, '跌幅提醒');
+                $webhookChannel = normalizeWebhookChannel($_POST['webhook_channel'] ?? '');
+                $webhookUrl = normalizeWebhookUrl($_POST['webhook_url'] ?? '');
+                validateWebhookSettings($webhookChannel, $webhookUrl);
                 $appSettingsRepository->saveDisplaySettings(
                     $quoteRefreshSeconds,
                     $quoteRefreshOnlyTradingHours,
                     $calculatorDefaultLotSize,
                     $positionAlertGainPercent,
-                    $positionAlertLossPercent
+                    $positionAlertLossPercent,
+                    $webhookChannel,
+                    $webhookUrl
                 );
                 successResponse(formatAppSettings($appSettingsRepository->get(), $config));
+                break;
+
+            case 'webhook.test':
+                requirePost();
+                $webhookChannel = normalizeWebhookChannel($_POST['webhook_channel'] ?? '');
+                $webhookUrl = normalizeWebhookUrl($_POST['webhook_url'] ?? '');
+                validateWebhookSettings($webhookChannel, $webhookUrl, true);
+                if (!$webhookService->sendTestMessage($webhookChannel, $webhookUrl)) {
+                    errorResponse('测试 webhook 消息发送失败', 502);
+                }
+                successResponse(['message' => '测试 webhook 消息已发送']);
                 break;
 
             case 'ttrades':
@@ -219,6 +238,7 @@ function routeRequest(PDO $pdo, array $config): void
                     $record = enrichOpenTTradeRecord($record, $quotes, $calculatorService);
                 }
                 unset($record);
+                pushOpenTTradeWebhookAlerts($appSettingsRepository, $webhookService, $records);
                 successResponse(['items' => $records]);
                 break;
 
@@ -237,6 +257,28 @@ function routeRequest(PDO $pdo, array $config): void
                 }
 
                 successResponse(buildOpenTTradeEstimate($record, $price, $calculatorService));
+                break;
+
+            case 'ttrade.alert.update':
+                requirePost();
+                $id = requirePositiveInt($_POST['id'] ?? null, '记录ID');
+                $record = $tTradeRepository->findById($id);
+                if ($record === null) {
+                    errorResponse('做T记录不存在', 404);
+                }
+
+                if ((string) ($record['status'] ?? '') !== 'open') {
+                    errorResponse('仅未完成的做T记录支持设置收益提醒', 422);
+                }
+
+                $alertProfitGain = normalizeOptionalPositiveFloat($_POST['alert_profit_gain'] ?? null, '正收益提醒');
+                $alertProfitLoss = normalizeOptionalPositiveFloat($_POST['alert_profit_loss'] ?? null, '负收益提醒');
+                $tTradeRepository->updateAlertThresholds($id, $alertProfitGain, $alertProfitLoss);
+                successResponse([
+                    'id' => $id,
+                    'alert_profit_gain' => $alertProfitGain,
+                    'alert_profit_loss' => $alertProfitLoss,
+                ]);
                 break;
 
             case 'ttrade.create':
@@ -415,6 +457,24 @@ function requireNonNegativeFloat(mixed $value, string $label): float
     return (float) $value;
 }
 
+function normalizeOptionalPositiveFloat(mixed $value, string $label): ?float
+{
+    if ($value === null) {
+        return null;
+    }
+
+    $string = trim((string) $value);
+    if ($string === '') {
+        return null;
+    }
+
+    if (!is_numeric($string) || (float) $string <= 0) {
+        throw new InvalidArgumentException($label . '必须大于 0');
+    }
+
+    return round((float) $string, 2);
+}
+
 function requirePositiveInt(mixed $value, string $label): int
 {
     if (filter_var($value, FILTER_VALIDATE_INT) === false || (int) $value <= 0) {
@@ -514,6 +574,122 @@ function parseImportedPositions(mixed $value): array
     return $items;
 }
 
+function normalizeWebhookChannel(mixed $value): string
+{
+    $channel = strtolower(trim((string) $value));
+    if ($channel === '') {
+        return '';
+    }
+
+    return requireIn($channel, ['wechat', 'feishu']);
+}
+
+function normalizeWebhookUrl(mixed $value): string
+{
+    return trim((string) $value);
+}
+
+function validateWebhookSettings(string $channel, string $url, bool $requireUrl = false): void
+{
+    if ($url === '') {
+        if ($requireUrl) {
+            throw new InvalidArgumentException('请填写 webhook 地址');
+        }
+        return;
+    }
+
+    if ($channel === '') {
+        throw new InvalidArgumentException('请先选择消息通知渠道');
+    }
+
+    $validatedUrl = filter_var($url, FILTER_VALIDATE_URL);
+    if ($validatedUrl === false) {
+        throw new InvalidArgumentException('webhook 地址格式不正确');
+    }
+
+    $scheme = strtolower((string) parse_url($url, PHP_URL_SCHEME));
+    if (!in_array($scheme, ['http', 'https'], true)) {
+        throw new InvalidArgumentException('webhook 地址仅支持 http 或 https');
+    }
+}
+
+function pushPositionWebhookAlerts(AppSettingsRepository $appSettingsRepository, WebhookService $webhookService, array $positions): void
+{
+    if ($positions === []) {
+        return;
+    }
+
+    $settings = $appSettingsRepository->get();
+    $channel = normalizeWebhookChannel($settings['webhook_channel'] ?? '');
+    $url = normalizeWebhookUrl($settings['webhook_url'] ?? '');
+    if ($channel === '' || $url === '') {
+        return;
+    }
+
+    $gainThreshold = isset($settings['position_alert_gain_percent'])
+        ? max(0.1, (float) $settings['position_alert_gain_percent'])
+        : 5.0;
+    $lossThreshold = isset($settings['position_alert_loss_percent'])
+        ? max(0.1, (float) $settings['position_alert_loss_percent'])
+        : 5.0;
+
+    foreach ($positions as $position) {
+        $changePercent = $position['change_percent'] ?? null;
+        if (!is_numeric($changePercent)) {
+            continue;
+        }
+
+        $changePercent = (float) $changePercent;
+        if ($changePercent >= $gainThreshold) {
+            $webhookService->sendPositionAlert($channel, $url, $position, 'gain', $gainThreshold);
+            continue;
+        }
+
+        if ($changePercent <= -$lossThreshold) {
+            $webhookService->sendPositionAlert($channel, $url, $position, 'loss', $lossThreshold);
+        }
+    }
+}
+
+function pushOpenTTradeWebhookAlerts(AppSettingsRepository $appSettingsRepository, WebhookService $webhookService, array $records): void
+{
+    if ($records === []) {
+        return;
+    }
+
+    $settings = $appSettingsRepository->get();
+    $channel = normalizeWebhookChannel($settings['webhook_channel'] ?? '');
+    $url = normalizeWebhookUrl($settings['webhook_url'] ?? '');
+    if ($channel === '' || $url === '') {
+        return;
+    }
+
+    foreach ($records as $record) {
+        if ((string) ($record['status'] ?? '') !== 'open') {
+            continue;
+        }
+
+        $estimate = $record['estimate'] ?? null;
+        $profit = is_array($estimate) ? ($estimate['profit'] ?? null) : null;
+        if (!is_numeric($profit)) {
+            continue;
+        }
+
+        $profit = round((float) $profit, 2);
+        $gainThreshold = normalizeOptionalPositiveFloat($record['alert_profit_gain'] ?? null, '正收益提醒');
+        $lossThreshold = normalizeOptionalPositiveFloat($record['alert_profit_loss'] ?? null, '负收益提醒');
+
+        if ($gainThreshold !== null && $profit >= $gainThreshold) {
+            $webhookService->sendTTradeAlert($channel, $url, $record, 'gain', $gainThreshold);
+            continue;
+        }
+
+        if ($lossThreshold !== null && $profit <= -$lossThreshold) {
+            $webhookService->sendTTradeAlert($channel, $url, $record, 'loss', $lossThreshold);
+        }
+    }
+}
+
 function formatAppSettings(?array $settings, array $config): array
 {
     return [
@@ -532,6 +708,8 @@ function formatAppSettings(?array $settings, array $config): array
         'position_alert_loss_percent' => isset($settings['position_alert_loss_percent'])
             ? max(0.1, (float) $settings['position_alert_loss_percent'])
             : 5.0,
+        'webhook_channel' => normalizeWebhookChannel($settings['webhook_channel'] ?? ''),
+        'webhook_url' => trim((string) ($settings['webhook_url'] ?? '')),
         'updated_at' => (string) ($settings['updated_at'] ?? ''),
     ];
 }

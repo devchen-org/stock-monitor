@@ -150,7 +150,7 @@ $appSettings = formatAppSettings($appSettingsRepository->get(), $config);
                         </select>
                     </label>
                 </div>
-                <div class="table-wrap"><table><thead><tr><th>状态</th><th>代码</th><th>名称</th><th>首次记录</th><th>第二次记录</th><th>收益</th><th>备注</th><th>操作</th></tr></thead><tbody id="ttrades-table"></tbody></table></div>
+                <div class="table-wrap"><table><thead><tr><th>状态</th><th>代码</th><th>名称</th><th>首次记录</th><th>第二次记录</th><th>收益</th><th>收益提醒</th><th>备注</th><th>操作</th></tr></thead><tbody id="ttrades-table"></tbody></table></div>
             </section>
         </section>
 
@@ -195,6 +195,27 @@ $appSettings = formatAppSettings($appSettingsRepository->get(), $config);
                         <div class="auth-actions">
                             <button type="button" id="enable-position-alerts">启用浏览器通知</button>
                             <button type="button" id="test-position-alerts">测试通知</button>
+                        </div>
+                    </div>
+                </section>
+                <section class="card">
+                    <h2>消息通知配置</h2>
+                    <p class="muted">可选择企业微信或飞书机器人，通过 webhook 按持仓轮询结果持续推送提醒。</p>
+                    <div class="refresh-controls settings-refresh-controls">
+                        <label class="refresh-field">
+                            <span>通知渠道</span>
+                            <select id="webhook-channel">
+                                <option value="">不启用</option>
+                                <option value="wechat" <?= ($appSettings['webhook_channel'] ?? '') === 'wechat' ? 'selected' : '' ?>>企业微信</option>
+                                <option value="feishu" <?= ($appSettings['webhook_channel'] ?? '') === 'feishu' ? 'selected' : '' ?>>飞书</option>
+                            </select>
+                        </label>
+                        <label class="refresh-field webhook-url-field span-2">
+                            <span>Webhook 地址</span>
+                            <input id="webhook-url" type="url" placeholder="请输入机器人 webhook 地址" value="<?= htmlspecialchars((string) ($appSettings['webhook_url'] ?? ''), ENT_QUOTES, 'UTF-8') ?>">
+                        </label>
+                        <div class="auth-actions">
+                            <button type="button" id="test-webhook-button">测试 webhook</button>
                         </div>
                     </div>
                 </section>
@@ -263,7 +284,7 @@ $appSettings = formatAppSettings($appSettingsRepository->get(), $config);
     </div>
 </div>
 <div id="toast" class="toast hidden"></div>
-<script>window.APP_CONFIG = <?= json_encode(['quoteRefreshSeconds' => (int) $appSettings['quote_refresh_seconds'], 'quoteRefreshOnlyTradingHours' => (bool) $appSettings['quote_refresh_only_trading_hours'], 'calculatorDefaultLotSize' => (int) $appSettings['calculator_default_lot_size'], 'positionAlertGainPercent' => (float) $appSettings['position_alert_gain_percent'], 'positionAlertLossPercent' => (float) $appSettings['position_alert_loss_percent']], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;</script>
+<script>window.APP_CONFIG = <?= json_encode(['quoteRefreshSeconds' => (int) $appSettings['quote_refresh_seconds'], 'quoteRefreshOnlyTradingHours' => (bool) $appSettings['quote_refresh_only_trading_hours'], 'calculatorDefaultLotSize' => (int) $appSettings['calculator_default_lot_size'], 'positionAlertGainPercent' => (float) $appSettings['position_alert_gain_percent'], 'positionAlertLossPercent' => (float) $appSettings['position_alert_loss_percent'], 'webhookChannel' => (string) ($appSettings['webhook_channel'] ?? ''), 'webhookUrl' => (string) ($appSettings['webhook_url'] ?? '')], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;</script>
 <script src="assets/app.js"></script>
 </body>
 </html>

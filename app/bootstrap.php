@@ -15,6 +15,7 @@ require __DIR__ . '/repositories/AppSettingsRepository.php';
 require __DIR__ . '/services/PositionService.php';
 require __DIR__ . '/services/CalculatorService.php';
 require __DIR__ . '/services/QuoteService.php';
+require __DIR__ . '/services/WebhookService.php';
 require __DIR__ . '/router.php';
 
 startAuthSession($config);
