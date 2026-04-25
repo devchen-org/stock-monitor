@@ -1,0 +1,11 @@
+services:
+  web:
+    build:
+      context: .
+      args:
+        PHP_IMAGE: ${PHP_IMAGE:-docker.m.daocloud.io/library/php:8.2-cli}
+    ports:
+      - "8090:8090"
+    volumes:
+      - ./storage:/app/storage
+    restart: unless-stopped

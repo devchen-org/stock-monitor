@@ -1,0 +1,5 @@
+.git
+.claude
+storage/*.db
+storage/*.db-*
+*.log
