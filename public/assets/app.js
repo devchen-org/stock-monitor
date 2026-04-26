@@ -12,6 +12,7 @@ const state = {
     ttrades: [],
     watchlist: [],
     calculatorInputs: {},
+    ttradeMergeInputs: {},
     auth: {
         loggedIn: false,
         passwordConfigured: false,
@@ -204,7 +205,33 @@ function bindTTradeControls() {
     if (ttradesTable) {
         ttradesTable.addEventListener('click', async (event) => {
             const target = event.target;
-            if (!(target instanceof HTMLElement) || !target.matches('[data-ttrade-alert-save]')) {
+            if (!(target instanceof HTMLElement)) {
+                return;
+            }
+
+            if (target.matches('[data-ttrade-alert-save]')) {
+                const id = Number(target.dataset.id || 0);
+                if (id <= 0) {
+                    return;
+                }
+
+                await saveTTradeAlertThresholds(id);
+                return;
+            }
+
+            if (target.matches('[data-ttrade-merge-run]')) {
+                const id = Number(target.dataset.id || 0);
+                if (id <= 0) {
+                    return;
+                }
+
+                await runTTradeMergeEstimate(id);
+            }
+        });
+
+        ttradesTable.addEventListener('change', (event) => {
+            const target = event.target;
+            if (!(target instanceof HTMLInputElement) || !target.matches('[data-ttrade-merge-lot]')) {
                 return;
             }
 
@@ -213,7 +240,13 @@ function bindTTradeControls() {
                 return;
             }
 
-            await saveTTradeAlertThresholds(id);
+            const lots = Math.max(1, Number.parseInt(target.value || '0', 10) || state.calculatorDefaultLotSize);
+            target.value = String(lots);
+            state.ttradeMergeInputs[id] = {
+                ...getTTradeMergeInput(id),
+                lots,
+            };
+            renderTTradesTable(state.ttrades || []);
         });
     }
 
@@ -519,6 +552,7 @@ function clearBusinessState() {
     state.ttrades = [];
     state.ttradeFilterName = '';
     state.calculatorInputs = {};
+    state.ttradeMergeInputs = {};
     state.positionAlertStateBySymbol = {};
     state.positionAlertsInitialized = false;
     state.notificationDebugItems = [];
@@ -1349,12 +1383,13 @@ function renderTTradesTable(items) {
     tbody.innerHTML = filteredItems.map((item) => {
         const isOpen = item.status === 'open';
         const estimate = isOpen ? item.estimate || null : null;
+        const mergeEstimate = isOpen ? resolveTTradeMergeEstimate(item) : null;
         const firstSide = item.first_side === 'buy' ? '买入' : '卖出';
         const secondSide = item.second_side === 'buy' ? '买入' : (item.second_side === 'sell' ? '卖出' : '--');
         const estimateSideLabel = estimate?.second_side === 'buy' ? '买入' : '卖出';
         const firstRecord = `${escapeHtml(item.first_date || '--')} ${firstSide} ${formatQuoteNumber(item.first_price)} × ${item.first_qty ?? '--'}`;
         const secondRecord = isOpen
-            ? renderOpenTTradeSecondRecord(estimate, estimateSideLabel)
+            ? renderOpenTTradeSecondRecord(item, estimate, estimateSideLabel, mergeEstimate)
             : `${escapeHtml(item.second_date || '--')} ${secondSide} ${formatQuoteNumber(item.second_price)} × ${item.second_qty ?? '--'}`;
         const profitValue = isOpen ? estimate?.profit : item.profit;
         const profitText = isOpen
@@ -1380,13 +1415,26 @@ function renderTTradesTable(items) {
     }).join('') || '<tr><td colspan="9" class="muted">暂无做T记录</td></tr>';
 }
 
-function renderOpenTTradeSecondRecord(estimate, estimateSideLabel) {
-    if (!estimate) {
-        return '<span class="ttrade-waiting">等待后续记录完成做T</span>';
-    }
+function renderOpenTTradeSecondRecord(item, estimate, estimateSideLabel, mergeEstimate) {
+    const mergeInput = getTTradeMergeInput(item.id);
+    const mergeSideLabel = item.first_side === 'buy' ? '买入' : '卖出';
+    const oppositeText = estimate
+        ? `<span class="muted">按相反方向当前价试算：${estimateSideLabel} ${formatQuoteNumber(estimate.second_price)} × ${estimate.second_qty}${estimate.quote_time ? `（${escapeHtml(estimate.quote_time)}）` : ''}</span>`
+        : '<span class="muted">当前行情价不可用，暂无法做收益试算</span>';
 
-    const quoteTime = estimate.quote_time ? `（${escapeHtml(estimate.quote_time)}）` : '';
-    return `<span class="ttrade-waiting">等待后续记录完成做T</span><br><span class="muted">按相反方向当前价试算：${estimateSideLabel} ${formatQuoteNumber(estimate.second_price)} × ${estimate.second_qty}${quoteTime}</span>`;
+    return `
+        <span class="ttrade-waiting">等待后续记录完成做T</span><br>
+        ${oppositeText}
+        <div class="ttrade-merge-estimate">
+            <div class="ttrade-merge-estimate-controls">
+                <span class="muted">同方向追加</span>
+                <input class="calculator-lot-input" data-ttrade-merge-lot data-id="${item.id}" type="number" min="1" step="1" value="${mergeInput.lots}">
+                <span class="muted">手</span>
+                <button type="button" data-ttrade-merge-run data-id="${item.id}">试算新成本</button>
+            </div>
+            ${renderTTradeMergeEstimateResult(mergeEstimate, mergeSideLabel)}
+        </div>
+    `;
 }
 
 function renderOpenTTradeProfit(estimate) {
@@ -1395,6 +1443,44 @@ function renderOpenTTradeProfit(estimate) {
     }
 
     return `<div>${formatMoney(estimate.profit)}</div><div class="muted">按相反方向当前价${estimate.second_side === 'buy' ? '买入' : '卖出'}完成</div>`;
+}
+
+function getTTradeMergeInput(id) {
+    const existing = state.ttradeMergeInputs[id];
+    if (existing) {
+        return existing;
+    }
+
+    const nextInput = {
+        lots: state.calculatorDefaultLotSize,
+        result: null,
+    };
+    state.ttradeMergeInputs[id] = nextInput;
+    return nextInput;
+}
+
+function resolveTTradeMergeEstimate(item) {
+    const input = getTTradeMergeInput(item.id);
+    if (input.result && Number(input.result.lots) === Number(input.lots)) {
+        return input.result;
+    }
+
+    const defaultEstimate = item.merge_estimate || null;
+    if (defaultEstimate && Number(defaultEstimate.lots) === Number(input.lots)) {
+        input.result = defaultEstimate;
+        return defaultEstimate;
+    }
+
+    return input.result || defaultEstimate;
+}
+
+function renderTTradeMergeEstimateResult(estimate, sideLabel) {
+    if (!estimate) {
+        return '<div class="calculator-note">当前行情价不可用，暂无法试算同方向新成本价</div>';
+    }
+
+    const quoteTime = estimate.quote_time ? `（${escapeHtml(estimate.quote_time)}）` : '';
+    return `<div class="calculator-note">按当前价同方向${sideLabel} ${estimate.lots} 手：${formatQuoteNumber(estimate.trade_price)} × ${estimate.trade_qty}，新数量 ${estimate.merged_qty}，新成本价 ${formatQuoteNumber(estimate.merged_price)}${quoteTime}</div>`;
 }
 
 function renderOpenTTradeAlertEditor(item) {
@@ -1450,6 +1536,19 @@ async function saveTTradeAlertThresholds(id) {
     await postForm('ttrade.alert.update', formData);
     toast('收益提醒已保存');
     await loadTTrades();
+}
+
+async function runTTradeMergeEstimate(id) {
+    const input = getTTradeMergeInput(id);
+    const formData = new FormData();
+    formData.append('id', String(id));
+    formData.append('lots', String(input.lots));
+    const result = await postForm('ttrade.merge-estimate', formData);
+    state.ttradeMergeInputs[id] = {
+        ...input,
+        result,
+    };
+    renderTTradesTable(state.ttrades || []);
 }
 
 async function submitForm(action, form, reload) {

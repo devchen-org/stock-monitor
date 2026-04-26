@@ -281,6 +281,30 @@ function routeRequest(PDO $pdo, array $config): void
                 ]);
                 break;
 
+            case 'ttrade.merge-estimate':
+                requirePost();
+                $id = requirePositiveInt($_POST['id'] ?? null, '记录ID');
+                $lots = requireMinimumInt($_POST['lots'] ?? null, 1, 'N手');
+                $record = $tTradeRepository->findById($id);
+                if ($record === null) {
+                    errorResponse('做T记录不存在', 404);
+                }
+
+                if ((string) ($record['status'] ?? '') !== 'open') {
+                    errorResponse('仅未完成的做T记录支持同向试算', 422);
+                }
+
+                $quote = $quoteService->getBatch([(string) ($record['symbol'] ?? '')]);
+                $symbol = strtoupper((string) ($record['symbol'] ?? ''));
+                $latestQuote = $quote[$symbol] ?? null;
+                $latestPrice = is_array($latestQuote) ? ($latestQuote['price'] ?? null) : null;
+                if (!is_numeric($latestPrice) || (float) $latestPrice <= 0) {
+                    errorResponse('当前行情价不可用，暂无法试算', 422);
+                }
+
+                successResponse(buildOpenTTradeMergeEstimate($record, (float) $latestPrice, $lots, $calculatorService, is_array($latestQuote) ? $latestQuote : []));
+                break;
+
             case 'ttrade.create':
                 requirePost();
                 $symbol = requireSymbol($_POST['symbol'] ?? '');
@@ -735,6 +759,13 @@ function enrichOpenTTradeRecord(array $record, array $quotes, CalculatorService 
 
     $record['estimate'] = buildOpenTTradeEstimate($record, (float) $latestPrice, $calculatorService);
     $record['estimate']['quote_time'] = trim((string) ($quote['time'] ?? ''));
+    $record['merge_estimate'] = buildOpenTTradeMergeEstimate(
+        $record,
+        (float) $latestPrice,
+        1,
+        $calculatorService,
+        $quote,
+    );
 
     return $record;
 }
@@ -757,5 +788,28 @@ function buildOpenTTradeEstimate(array $record, float $price, CalculatorService 
         'second_qty' => (int) $record['first_qty'],
         'matched_qty' => (int) $profitData['matched_qty'],
         'profit' => round((float) $profitData['profit'], 2),
+    ];
+}
+
+function buildOpenTTradeMergeEstimate(array $record, float $price, int $lots, CalculatorService $calculatorService, array $quote = []): array
+{
+    $tradeQty = max(1, $lots) * 100;
+    $mergedData = $calculatorService->mergeTTradeEntry(
+        (string) ($record['first_side'] ?? 'buy'),
+        (float) ($record['first_price'] ?? 0),
+        (int) ($record['first_qty'] ?? 0),
+        (string) ($record['first_side'] ?? 'buy'),
+        $price,
+        $tradeQty
+    );
+
+    return [
+        'side' => (string) ($record['first_side'] ?? 'buy'),
+        'trade_price' => round($price, 3),
+        'trade_qty' => $tradeQty,
+        'lots' => max(1, $lots),
+        'merged_qty' => (int) $mergedData['merged_qty'],
+        'merged_price' => round((float) $mergedData['merged_price'], 3),
+        'quote_time' => trim((string) ($quote['time'] ?? '')),
     ];
 }

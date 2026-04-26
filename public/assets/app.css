@@ -308,6 +308,17 @@ thead th {
 .ttrade-alert-editor button {
     justify-self: start;
 }
+.ttrade-merge-estimate {
+    display: grid;
+    gap: 6px;
+    margin-top: 8px;
+}
+.ttrade-merge-estimate-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
 .result-box {
     margin-top: 16px;
     min-height: 100px;
