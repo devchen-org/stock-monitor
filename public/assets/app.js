@@ -1379,7 +1379,15 @@ function renderTTradeSummary(stats) {
 
 function renderTTradesTable(items) {
     const tbody = document.getElementById('ttrades-table');
-    const filteredItems = filterTTrades(items || []);
+    const filteredItems = [...filterTTrades(items || [])].sort((left, right) => {
+        const leftOpen = left?.status === 'open' ? 0 : 1;
+        const rightOpen = right?.status === 'open' ? 0 : 1;
+        if (leftOpen !== rightOpen) {
+            return leftOpen - rightOpen;
+        }
+
+        return Number(right?.id ?? 0) - Number(left?.id ?? 0);
+    });
     tbody.innerHTML = filteredItems.map((item) => {
         const isOpen = item.status === 'open';
         const estimate = isOpen ? item.estimate || null : null;
